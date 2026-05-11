@@ -9,6 +9,7 @@ from collections.abc import Generator
 os.environ.setdefault("TERRA_SECRET_KEY", "unittest-terra-secret-key-32chars-min!")
 os.environ.setdefault("TERRA_DATABASE_URL", "sqlite:///:memory:")
 os.environ.setdefault("TERRA_SDWAN_BACKGROUND_SYNC", "false")
+os.environ.setdefault("TERRA_SDWAN_SYNC_ENRICH_DEVICE_DETAILS", "false")
 os.environ.setdefault("TERRA_ADMIN_EMAIL", "admin@test.tld")
 os.environ.setdefault("TERRA_ADMIN_PASSWORD", "TestAdminPass-long10")
 

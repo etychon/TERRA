@@ -12,6 +12,7 @@ from fastapi.responses import HTMLResponse
 from fastapi.templating import Jinja2Templates
 from sqlalchemy.orm import Session
 
+from terra.config import get_settings
 from terra.crud import user_to_public
 from terra.crud_devices import (
     device_to_home_row,
@@ -231,9 +232,13 @@ def device_detail(
     except json.JSONDecodeError:
         parsed = {}
     manager_field_groups = _manager_field_groups_from_parsed(parsed)
-    interface_rows = extract_interface_rows(parsed)
     cellular_kv = extract_cellular_kv(parsed)
     serial_display = display_serial(row.serial_number, parsed)
+    # Interfaces and cellular hints come from last synced inventory only (background sync),
+    # not blocking Manager dataservice calls on page load.
+    interface_rows = extract_interface_rows(parsed)
+    settings = get_settings()
+
     return templates.TemplateResponse(
         request,
         "device_detail.html",
@@ -253,5 +258,6 @@ def device_detail(
             "cellular_kv": cellular_kv,
             "manager_field_groups": manager_field_groups,
             "pretty_json": json.dumps(parsed, indent=2, sort_keys=True, default=str)[:120000],
+            "device_live_poll_interval_ms": max(3000, settings.device_live_poll_interval_seconds * 1000),
         },
     )

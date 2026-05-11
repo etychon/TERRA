@@ -52,6 +52,44 @@ def test_extract_interface_rows_from_device_interface() -> None:
     assert rows[0]["vrf"] == "default"
 
 
+def test_extract_interface_rows_dict_mapping() -> None:
+    parsed = {
+        "interface": {
+            "GigabitEthernet0/0": {"ip-address": "10.0.0.1"},
+            "GigabitEthernet0/1": {"ipv4Address": "10.0.1.1", "vrfName": "1"},
+        }
+    }
+    rows = extract_interface_rows(parsed)
+    assert len(rows) == 2
+    names = {r["interface"] for r in rows}
+    assert names == {"GigabitEthernet0/0", "GigabitEthernet0/1"}
+
+
+def test_extract_interface_rows_nested_running() -> None:
+    parsed = {
+        "running": {
+            "interfaces": [
+                {"ifname": "eth0", "ip-address": "1.1.1.1"},
+            ]
+        }
+    }
+    rows = extract_interface_rows(parsed)
+    assert len(rows) == 1
+    assert rows[0]["interface"] == "eth0"
+
+
+def test_extract_interface_rows_vmanage_aliases() -> None:
+    parsed = {
+        "deviceInterface": [
+            {"vpn-interface-name": "GE0/1", "interfaceIp": "10.2.2.2"},
+        ]
+    }
+    rows = extract_interface_rows(parsed)
+    assert len(rows) == 1
+    assert rows[0]["interface"] == "GE0/1"
+    assert rows[0]["ip"] == "10.2.2.2"
+
+
 def test_display_serial_prefers_stored() -> None:
     assert display_serial("SN1", {"serialNumber": "SN2"}) == "SN1"
 

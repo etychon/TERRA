@@ -15,7 +15,7 @@ from terra.crud import user_to_public
 from terra.crud_devices import list_all_devices_for_ui
 from terra.db import get_db
 from terra.deps import get_current_user_optional, user_is_admin
-from terra.inventory_extract import extract_geo_lat_lng
+from terra.inventory_extract import extract_geo_lat_lng, utc_iso_for_json
 from terra.models import User
 
 router = APIRouter(tags=["home"])
@@ -46,6 +46,9 @@ def _map_markers_from_db(db: Session) -> list[dict[str, Any]]:
                 "site": d.site_id or "",
                 "serial": d.serial_number or "",
                 "reachability": d.reachability or "",
+                "software_version": d.software_version or "",
+                "synced_at_utc": utc_iso_for_json(d.synced_at_utc),
+                "state_changed_at_utc": utc_iso_for_json(d.state_changed_at_utc),
             }
         )
     return markers

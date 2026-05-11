@@ -34,6 +34,34 @@ class Settings(BaseSettings):
     )
     sdwan_sync_interval_seconds: int = Field(default=300, ge=30, le=86400)
     sdwan_sync_startup_delay_seconds: int = Field(default=10, ge=0, le=600)
+    sdwan_sync_enrich_device_details: bool = Field(
+        default=True,
+        description="During inventory sync, merge per-device interface/cellular dataservice rows into raw_json.",
+    )
+    sdwan_sync_enrich_max_inventory_devices: int = Field(
+        default=400,
+        ge=0,
+        le=20000,
+        description="Skip per-device enrichment when Manager inventory row count exceeds this (bounds sync time).",
+    )
+    sdwan_sync_enrich_request_timeout_seconds: float = Field(
+        default=8.0,
+        ge=1.0,
+        le=45.0,
+        description="HTTP timeout (seconds) for each per-device enrich GET during sync.",
+    )
+    device_live_poll_interval_seconds: int = Field(
+        default=5,
+        ge=3,
+        le=120,
+        description="Default interval for device detail 'live data' UI polling when enabled.",
+    )
+    device_live_http_timeout_seconds: float = Field(
+        default=25.0,
+        ge=5.0,
+        le=120.0,
+        description="HTTP timeout for each Manager dataservice call used by device live polling API.",
+    )
     debug_expose_internals: bool = Field(
         default=False,
         description="Lab only: mount unauthenticated /debug/* routes (requires TERRA_DEBUG_TOKEN).",

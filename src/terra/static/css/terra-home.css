@@ -1,6 +1,7 @@
-/* Home dashboard map — Leaflet host + marker tones */
+/* Home dashboard map — Leaflet host, pins, detail sheet, telemetry ripples */
 
 .terra-home-map-wrap {
+  position: relative;
   margin-top: 1rem;
   border-radius: var(--md-sys-shape-corner-large);
   border: 1px solid hsl(var(--border) / 0.55);
@@ -19,6 +20,223 @@
   margin: 0.5rem 0 0;
   font-size: 0.8125rem;
   color: hsl(var(--muted-foreground));
+}
+
+/* Leaflet injects this wrapper around our pin HTML */
+.leaflet-marker-icon.terra-map-pin-wrap {
+  border: none !important;
+  background: transparent !important;
+}
+
+.terra-map-pin {
+  position: relative;
+  width: 100px;
+  height: 44px;
+  pointer-events: auto;
+  cursor: pointer;
+}
+
+.terra-map-pin__dot {
+  position: absolute;
+  left: 50%;
+  bottom: 0;
+  width: 14px;
+  height: 14px;
+  margin-left: -7px;
+  border-radius: 50%;
+  border: 2px solid hsl(215 45% 8%);
+  box-shadow: 0 0 10px hsl(168 100% 45% / 0.45);
+  transition: transform 0.18s ease;
+}
+
+.terra-map-pin:hover .terra-map-pin__dot {
+  transform: scale(1.12);
+}
+
+.terra-map-pin__dot--online {
+  background: hsl(142 65% 42%);
+  box-shadow: 0 0 12px hsl(142 70% 48% / 0.55);
+}
+
+.terra-map-pin__dot--offline {
+  background: hsl(4 72% 48%);
+  box-shadow: 0 0 12px hsl(4 80% 45% / 0.45);
+}
+
+/* Device name expands above the dot on hover */
+.terra-map-pin__name {
+  position: absolute;
+  left: 50%;
+  bottom: 100%;
+  margin-bottom: 4px;
+  transform: translateX(-50%) translateY(4px) scale(0.92);
+  max-width: 14rem;
+  padding: 0.2rem 0.55rem;
+  border-radius: var(--md-sys-shape-corner-small);
+  font-size: 0.6875rem;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  line-height: 1.2;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: hsl(166 90% 92%);
+  background: hsl(215 42% 12% / 0.92);
+  border: 1px solid hsl(168 45% 38% / 0.65);
+  box-shadow: 0 2px 12px hsl(0 0% 0% / 0.35);
+  opacity: 0;
+  pointer-events: none;
+  transition:
+    opacity 0.2s ease,
+    transform 0.22s ease;
+}
+
+.terra-map-pin:hover .terra-map-pin__name {
+  opacity: 1;
+  transform: translateX(-50%) translateY(0) scale(1);
+}
+
+.terra-map-pin__ripples {
+  position: absolute;
+  left: 50%;
+  bottom: 7px;
+  width: 44px;
+  height: 44px;
+  margin-left: -22px;
+  margin-bottom: -22px;
+  pointer-events: none;
+}
+
+@keyframes terra-map-ripple-expand {
+  0% {
+    transform: translate(-50%, -50%) scale(0.35);
+    opacity: 0.72;
+  }
+  100% {
+    transform: translate(-50%, -50%) scale(2.85);
+    opacity: 0;
+  }
+}
+
+.terra-map-ripple-burst {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 40px;
+  height: 40px;
+  margin: 0;
+  border-radius: 50%;
+  border-width: 2px;
+  border-style: solid;
+  box-sizing: border-box;
+  transform: translate(-50%, -50%);
+  animation: terra-map-ripple-expand 1.05s ease-out forwards;
+}
+
+.terra-map-ripple-burst--online {
+  border-color: hsl(142 70% 52% / 0.85);
+  box-shadow: 0 0 8px hsl(142 80% 45% / 0.35);
+}
+
+.terra-map-ripple-burst--offline {
+  border-color: hsl(4 75% 55% / 0.85);
+  box-shadow: 0 0 8px hsl(4 80% 48% / 0.35);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .terra-map-ripple-burst {
+    animation: none;
+    opacity: 0;
+  }
+
+  .terra-map-pin__name {
+    transition: none;
+  }
+
+  .terra-map-pin:hover .terra-map-pin__dot {
+    transform: none;
+  }
+}
+
+/* Detail sheet over map */
+.terra-home-map-detail {
+  position: absolute;
+  top: 0.65rem;
+  right: 0.65rem;
+  z-index: 1100;
+  width: min(20rem, calc(100% - 1.3rem));
+  max-height: min(70%, calc(100% - 1.3rem));
+  overflow: auto;
+  padding: 0.75rem 0.85rem 0.85rem;
+  border-radius: var(--md-sys-shape-corner-large);
+  border: 1px solid hsl(var(--border) / 0.65);
+  background: hsl(var(--card) / 0.96);
+  color: hsl(var(--foreground));
+  box-shadow: var(--md-sys-elevation-2);
+}
+
+.terra-home-map-detail__head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 0.5rem;
+  margin-bottom: 0.5rem;
+}
+
+.terra-home-map-detail__title {
+  margin: 0;
+  font-size: 1rem;
+  font-weight: 600;
+  line-height: 1.25;
+  word-break: break-word;
+}
+
+.terra-home-map-detail__close {
+  flex-shrink: 0;
+  width: 2rem;
+  height: 2rem;
+  margin: 0;
+  padding: 0;
+  border: none;
+  border-radius: var(--md-sys-shape-corner-full);
+  font-size: 1.25rem;
+  line-height: 1;
+  cursor: pointer;
+  color: hsl(var(--foreground));
+  background: hsl(var(--muted) / 0.45);
+}
+
+.terra-home-map-detail__close:hover {
+  background: hsl(var(--muted) / 0.75);
+}
+
+.terra-home-map-detail__body {
+  font-size: 0.8125rem;
+  line-height: 1.35;
+}
+
+.terra-home-map-detail__dl {
+  margin: 0;
+  padding: 0;
+  display: grid;
+  grid-template-columns: minmax(7.5rem, 9.5rem) 1fr;
+  gap: 0.35rem 0.5rem;
+}
+
+.terra-home-map-detail__dl dt {
+  margin: 0;
+  font-weight: 500;
+  color: hsl(var(--muted-foreground));
+}
+
+.terra-home-map-detail__dl dd {
+  margin: 0;
+  word-break: break-word;
+}
+
+.terra-home-map-detail__more {
+  margin-top: 0.85rem;
+  width: 100%;
 }
 
 .leaflet-popup-content-wrapper {
@@ -42,22 +260,4 @@
   display: block;
   margin-bottom: 0.35rem;
   font-size: 0.875rem;
-}
-
-.terra-map-marker-dot {
-  width: 14px;
-  height: 14px;
-  border-radius: 50%;
-  border: 2px solid hsl(215 45% 8%);
-  box-shadow: 0 0 10px hsl(168 100% 45% / 0.45);
-}
-
-.terra-map-marker-dot--online {
-  background: hsl(142 65% 42%);
-  box-shadow: 0 0 12px hsl(142 70% 48% / 0.55);
-}
-
-.terra-map-marker-dot--offline {
-  background: hsl(4 72% 48%);
-  box-shadow: 0 0 12px hsl(4 80% 45% / 0.45);
 }

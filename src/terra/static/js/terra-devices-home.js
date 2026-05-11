@@ -13,8 +13,10 @@
     return;
   }
   const showOwner = mount.getAttribute("data-show-owner") === "true";
-  const LONG_MS = 550;
-  const CLICK_MS = 420;
+  /* Long-press for bulk; CLICK_MS must be > LONG_MS so a slow tap (hold then release before bulk) still navigates. */
+  const LONG_MS = 750;
+  const CLICK_MS = 950;
+  const NAV_FLASH_MS = 260;
   const MOVE_PX = 12;
 
   let data = [];
@@ -140,6 +142,16 @@
     }
   }
 
+  /** Tabulator column persistence can restore _terra_sel as visible after tableBuilt; keep it in sync. */
+  function setSelectableRowsEnabled(enabled) {
+    try {
+      /* Use a high numeric cap: some Tabulator builds treat boolean true like a small limit for rolling selection. */
+      table.setOption("selectableRows", enabled ? 9999 : false);
+    } catch (_e) {
+      /* older Tabulator builds */
+    }
+  }
+
   function updateBulkBanner() {
     if (bulkBanner) {
       bulkBanner.hidden = !bulkMode;
@@ -153,6 +165,7 @@
       return;
     }
     bulkMode = true;
+    setSelectableRowsEnabled(true);
     updateBulkBanner();
     if (firstRow && firstRow.select) {
       firstRow.select();
@@ -160,10 +173,27 @@
   }
 
   function exitBulkMode() {
-    bulkMode = false;
-    table.deselectRow();
+    try {
+      if (typeof table.deselectRow === "function") {
+        table.deselectRow();
+      }
+    } catch (_e) {
+      try {
+        const rows = table.getSelectedRows ? table.getSelectedRows() : [];
+        for (let i = 0; i < rows.length; i++) {
+          const r = rows[i];
+          if (r && typeof r.deselect === "function") {
+            r.deselect();
+          }
+        }
+      } catch (_e2) {
+        /* ignore */
+      }
+    }
     selectedIds.clear();
     selectedOrder.length = 0;
+    bulkMode = false;
+    setSelectableRowsEnabled(false);
     updateBulkBanner();
     updateCompareButton();
     flashCompareButton();
@@ -214,6 +244,9 @@
   }
 
   function reapplySelectionForVisibleRows() {
+    if (!bulkMode) {
+      return;
+    }
     selectedOrder.forEach(function (id) {
       const row = table.getRow(id);
       if (row && row.select) {
@@ -264,10 +297,13 @@
     paginationSizeSelector: [10, 25, 50, 100],
     movableColumns: true,
     resizableColumns: true,
-    selectableRows: true,
+    /* Off until long-press bulk mode; avoids taps being eaten by row selection / double-toggle with our handler. */
+    selectableRows: false,
+    selectableRowsRollingSelection: true,
+    selectableRowsPersistence: false,
     initialSort: [{ column: "hostname", dir: "asc" }],
     persistence: { columns: true, sort: true },
-    persistenceID: showOwner ? "terra-devices-grid-v4-owner" : "terra-devices-grid-v4",
+    persistenceID: showOwner ? "terra-devices-grid-v6-owner" : "terra-devices-grid-v6",
     columns: baseColumns,
   });
 
@@ -276,6 +312,10 @@
   });
   table.on("rowDeselected", function (row) {
     trackSelected(row, false);
+  });
+
+  table.on("columnsLoaded", function () {
+    syncSelectionColumn();
   });
 
   table.on("pageLoaded", function () {
@@ -352,13 +392,21 @@
           return;
         }
         if (bulkMode) {
-          row.toggleSelect();
+          /* Tabulator handles row/checkbox selection when selectableRows is enabled. */
           return;
         }
         if (dt < CLICK_MS && st.longArmed) {
           const id = row.getData().id;
           if (id) {
-            window.location.assign(`/devices/${id}`);
+            const url = "/devices/" + id;
+            const el = typeof row.getElement === "function" ? row.getElement() : null;
+            if (el) {
+              el.classList.add("terra-devices-row--navigating");
+              void el.offsetWidth;
+            }
+            window.setTimeout(function () {
+              window.location.assign(url);
+            }, NAV_FLASH_MS);
           }
         }
       },
@@ -377,6 +425,10 @@
       true,
     );
     updateCompareButton();
+  });
+
+  queueMicrotask(function () {
+    updateBulkBanner();
   });
 
   if (compareBtn) {
@@ -404,9 +456,15 @@
   }
 
   if (bulkExitBtn) {
-    bulkExitBtn.addEventListener("click", function () {
-      exitBulkMode();
-    });
+    bulkExitBtn.addEventListener(
+      "click",
+      function (ev) {
+        ev.preventDefault();
+        ev.stopPropagation();
+        exitBulkMode();
+      },
+      true,
+    );
   }
 
   const syncBtn = document.getElementById("terra-devices-sync-btn");

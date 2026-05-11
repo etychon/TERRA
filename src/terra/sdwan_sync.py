@@ -13,10 +13,12 @@ import httpx
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from terra.config import get_settings
 from terra.inventory_extract import deep_find_serial
 from terra.models import SdWanLinkStatus, SdWanManagerInstance, SyncedDevice
 from terra.sdwan_client import read_manager_version
 from terra.sdwan_dataservice_rows import rows_from_dataservice_body
+from terra.sdwan_device_live import enrich_inventory_row_for_sync
 from terra.sdwan_http import open_manager_http_client
 
 logger = logging.getLogger(__name__)
@@ -245,12 +247,34 @@ def sync_devices_for_instance(db: Session, secret_key: str, inst: SdWanManagerIn
     now = _utcnow()
     touched = 0
     try:
+        settings = get_settings()
         with open_manager_http_client(secret_key, inst) as client:
             rows = fetch_device_inventory(client, inst.base_url)
             if not inst.manager_version:
                 mv = read_manager_version(client, inst.base_url)
                 if mv:
                     inst.manager_version = mv[:128]
+
+            enrich = (
+                settings.sdwan_sync_enrich_device_details
+                and len(rows) <= settings.sdwan_sync_enrich_max_inventory_devices
+            )
+            if enrich and rows:
+                enriched: list[dict[str, Any]] = []
+                for raw in rows:
+                    try:
+                        enriched.append(
+                            enrich_inventory_row_for_sync(
+                                client,
+                                inst.base_url,
+                                raw,
+                                request_timeout=settings.sdwan_sync_enrich_request_timeout_seconds,
+                            )
+                        )
+                    except Exception:
+                        logger.debug("SD-WAN per-device enrich failed (instance id=%s)", inst.id, exc_info=True)
+                        enriched.append(raw)
+                rows = enriched
     except (RuntimeError, ValueError, httpx.RequestError, OSError) as e:
         logger.warning("SD-WAN device sync failed for instance %s: %s", inst.id, e)
         return 0, str(e)[:500]

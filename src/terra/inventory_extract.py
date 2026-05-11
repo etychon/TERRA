@@ -141,6 +141,36 @@ _IFACE_LIST_KEYS = (
     "ipInterfaces",
     "interfaceList",
     "vpnInterface",
+    "runningInterfaces",
+    "device-interfaces",
+    "deviceInterfaces",
+)
+
+# When walking nested Manager JSON, only descend into these object keys (avoids huge unrelated trees).
+_IFACE_RECURSE_PARENT_KEYS = frozenset(
+    {
+        "running",
+        "config",
+        "device",
+        "deviceInventory",
+        "device-data",
+        "deviceData",
+        "vdevice-data",
+        "vdeviceData",
+        "data",
+        "DATA",
+        "system",
+        "hardware",
+        "platform",
+        "lifeCycle",
+        "life-cycle",
+        "bfd",
+        "omp",
+        "vpn",
+        "vpn-instance",
+        "vpnInstance",
+        "terraEnrichedFromSync",
+    }
 )
 
 
@@ -148,22 +178,56 @@ def _row_from_interface_dict(d: dict[str, Any]) -> dict[str, str]:
     name = _pick(
         d,
         "ifname",
+        "ifName",
         "interfaceName",
+        "interface-name",
         "intf-name",
         "intfName",
+        "intf",
         "name",
-        "interface-name",
+        "interface",
+        "Interface",
+        "vpn-interface-name",
+        "vpnInterfaceName",
+        "src-if",
+        "srcIf",
+        "logicalIfName",
+        "physical-interface",
+        "physicalInterface",
+        "nic",
+        "INTF",
     )
     ip_val = _pick(
         d,
         "ip-address",
         "ipAddress",
+        "intf-ip-address",
+        "intfIpAddress",
+        "interfaceIp",
+        "interface-ip",
+        "interface-ip-address",
+        "interfaceIpAddress",
         "ipv4-address",
         "ipv4Address",
+        "ipv4-addr",
+        "ipv4Addr",
         "address",
         "ip",
+        "private-ip",
+        "privateIp",
+        "public-ip",
+        "publicIp",
     )
-    vrf = _pick(d, "vrfName", "vrf-name", "vrf", "vpn-id", "vpnId")
+    vrf = _pick(
+        d,
+        "vrfName",
+        "vrf-name",
+        "vrf",
+        "vpn-id",
+        "vpnId",
+        "vpn-name",
+        "vpnName",
+    )
     admin = _pick(d, "admin-state", "adminState", "if-admin-status", "admin-v26")
     oper = _pick(d, "oper-state", "operState", "operation-state", "line-protocol")
     mtu = _pick(d, "mtu", "if-mtu")
@@ -179,13 +243,56 @@ def _row_from_interface_dict(d: dict[str, Any]) -> dict[str, str]:
     return out
 
 
+def _ingest_interface_list(items: list[Any], add_row: Any) -> None:
+    for item in items:
+        if isinstance(item, dict):
+            add_row(_row_from_interface_dict(item))
+
+
+def _ingest_interface_dict_map(mapping: dict[str, Any], add_row: Any) -> None:
+    """vManage often uses ``interface: { \"Gi0/0\": { ... } }`` instead of a list."""
+    for name_key, item in mapping.items():
+        if not isinstance(item, dict):
+            continue
+        row = _row_from_interface_dict(item)
+        if row["interface"] == "—" and isinstance(name_key, str):
+            nk = name_key.strip()
+            if nk and not nk.isdigit():
+                row["interface"] = nk
+        add_row(row)
+
+
+def _walk_nested_for_interfaces(obj: Any, depth: int, add_row: Any) -> None:
+    if depth > 8:
+        return
+    if isinstance(obj, dict):
+        for k, v in obj.items():
+            lk = str(k).lower()
+            if isinstance(v, list) and (k in _IFACE_LIST_KEYS or lk.endswith("interfaces")):
+                _ingest_interface_list(v, add_row)
+            elif isinstance(v, dict) and lk == "interface":
+                _ingest_interface_dict_map(v, add_row)
+            elif isinstance(v, dict) and lk in _IFACE_RECURSE_PARENT_KEYS:
+                _walk_nested_for_interfaces(v, depth + 1, add_row)
+            elif isinstance(v, list) and lk == "data" and depth < 3 and v:
+                for x in v[:40]:
+                    if isinstance(x, dict):
+                        _walk_nested_for_interfaces(x, depth + 1, add_row)
+            elif isinstance(v, list) and lk.endswith("interface") and lk != "interface":
+                _ingest_interface_list(v, add_row)
+    elif isinstance(obj, list):
+        for x in obj[:80]:
+            _walk_nested_for_interfaces(x, depth + 1, add_row)
+
+
 def extract_interface_rows(parsed: dict[str, Any]) -> list[dict[str, str]]:
     """Summarize interfaces from common SD-WAN / vManage device payload shapes."""
     rows: list[dict[str, str]] = []
-    seen: set[tuple[str, str]] = set()
+    seen: set[tuple[str, str, str, str]] = set()
 
     def add_row(r: dict[str, str]) -> None:
-        key = (r["interface"], r.get("ip", ""))
+        # Wider key than (ifname, ip) so rows that map to placeholders are not all collapsed into one.
+        key = (r["interface"], r.get("ip", ""), r.get("vrf", ""), (r.get("detail") or "")[:160])
         if key in seen:
             return
         seen.add(key)
@@ -194,16 +301,16 @@ def extract_interface_rows(parsed: dict[str, Any]) -> list[dict[str, str]]:
     for lk in _IFACE_LIST_KEYS:
         raw = parsed.get(lk)
         if isinstance(raw, list):
-            for item in raw:
-                if isinstance(item, dict):
-                    add_row(_row_from_interface_dict(item))
+            _ingest_interface_list(raw, add_row)
 
     for k, v in parsed.items():
         lk = str(k).lower()
-        if lk.endswith("interface") and isinstance(v, list):
-            for item in v:
-                if isinstance(item, dict):
-                    add_row(_row_from_interface_dict(item))
+        if lk == "interface" and isinstance(v, dict):
+            _ingest_interface_dict_map(v, add_row)
+        elif lk.endswith("interface") and isinstance(v, list):
+            _ingest_interface_list(v, add_row)
+
+    _walk_nested_for_interfaces(parsed, 0, add_row)
 
     return rows[:500]
 

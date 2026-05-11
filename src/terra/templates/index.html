@@ -33,10 +33,31 @@
     {% if map_has_markers %}
     <p class="terra-home-map-note">
       Only devices whose Manager inventory JSON includes latitude/longitude (or geoLocation) are shown.
-      <strong>Green</strong> markers are online (reachable); <strong>red</strong> are offline.
+      <strong>Green</strong> markers are online (reachable); <strong>red</strong> are offline. Hover a marker to expand
+      the name; click for a summary and <strong>More</strong> for the full device page. When inventory or reachability
+      updates, a brief ripple radiates from that marker.
     </p>
     <script type="application/json" id="terra-home-map-markers">{{ map_markers_json | safe }}</script>
     <div class="terra-home-map-wrap">
+      <aside
+        id="terra-home-map-detail"
+        class="terra-home-map-detail"
+        hidden
+        aria-labelledby="terra-home-map-detail-title"
+      >
+        <div class="terra-home-map-detail__head">
+          <h3 id="terra-home-map-detail-title" class="terra-home-map-detail__title">Device</h3>
+          <button id="terra-home-map-detail-close" type="button" class="terra-home-map-detail__close" aria-label="Close">
+            ×
+          </button>
+        </div>
+        <div id="terra-home-map-detail-body" class="terra-home-map-detail__body"></div>
+        <a
+          id="terra-home-map-detail-more"
+          class="terra-btn terra-btn--filled terra-btn--inline terra-home-map-detail__more"
+          href="/devices"
+          >More</a>
+      </aside>
       <div id="terra-home-map" class="terra-home-map" role="application" aria-label="Device locations map"></div>
     </div>
     {% else %}

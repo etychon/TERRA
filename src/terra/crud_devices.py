@@ -8,7 +8,7 @@ from typing import Any
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from terra.inventory_extract import deep_find_serial, utc_iso_for_json
+from terra.inventory_extract import deep_find_serial, extract_geo_lat_lng, utc_iso_for_json
 from terra.models import SdWanManagerInstance, SyncedDevice, User
 
 
@@ -21,6 +21,30 @@ def list_all_devices_for_ui(db: Session) -> list[tuple[SyncedDevice, str]]:
         .order_by(User.email.asc(), SyncedDevice.hostname.asc(), SyncedDevice.id.asc())
     )
     return [(d, mail) for d, mail in db.execute(q).all()]
+
+
+def list_map_device_telemetry_for_ui(db: Session) -> list[dict[str, Any]]:
+    """Devices that appear on the home map (have lat/lng in raw JSON) with fields for poll/ripple."""
+    out: list[dict[str, Any]] = []
+    for d, _owner in list_all_devices_for_ui(db):
+        try:
+            raw = json.loads(d.raw_json)
+            if not isinstance(raw, dict):
+                raw = {}
+        except json.JSONDecodeError:
+            raw = {}
+        lat, lng = extract_geo_lat_lng(raw)
+        if lat is None or lng is None:
+            continue
+        out.append(
+            {
+                "id": d.id,
+                "synced_at_utc": utc_iso_for_json(d.synced_at_utc),
+                "state_changed_at_utc": utc_iso_for_json(d.state_changed_at_utc),
+                "reachability": d.reachability or "",
+            }
+        )
+    return out
 
 
 def get_device_for_user(db: Session, _user_id: int, device_id: int) -> SyncedDevice | None:

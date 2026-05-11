@@ -40,6 +40,27 @@ def test_manager_field_groups_by_value_type() -> None:
     assert flat == len(data)
 
 
+def test_map_devices_telemetry_requires_login(client: TestClient) -> None:
+    assert client.get("/api/v1/me/map-devices-telemetry").status_code == 401
+
+
+def test_live_sdwan_device_requires_login(client: TestClient) -> None:
+    assert client.get("/api/v1/me/devices/1/live-sdwan").status_code == 401
+
+
+def test_live_sdwan_device_not_found(client: TestClient) -> None:
+    _login(client)
+    r = client.get("/api/v1/me/devices/999999/live-sdwan")
+    assert r.status_code == 404
+
+
+def test_map_devices_telemetry_empty_when_no_geo_devices(client: TestClient) -> None:
+    _login(client)
+    r = client.get("/api/v1/me/map-devices-telemetry")
+    assert r.status_code == 200
+    assert r.json() == {"devices": []}
+
+
 def test_compare_requires_two_ids(client: TestClient) -> None:
     _login(client)
     assert client.get("/devices/compare?ids=1").status_code == 400

@@ -22,6 +22,7 @@ For **local inspection** (DB URL redacted, table row counts, SD-WAN manager rows
 
 ```bash
 ./scripts/launch-terra-debug.sh
+export TERRA_DEBUG_TOKEN="$(cat .run/terra-debug.token)"   # optional: new shell / script did not export to your session
 curl -sS -H "X-Terra-Debug-Token: $TERRA_DEBUG_TOKEN" "http://127.0.0.1:${TERRA_DEBUG_API_PORT:-18434}/debug/summary"
 # Same host on LAN (example IP):
 curl -sS -H "X-Terra-Debug-Token: $TERRA_DEBUG_TOKEN" "http://192.168.2.3:${TERRA_DEBUG_API_PORT:-18434}/debug/summary"

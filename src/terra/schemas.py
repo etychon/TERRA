@@ -83,3 +83,43 @@ class SyncDevicesStats(BaseModel):
     managers: int
     rows_touched: int
     errors: int
+
+
+class MapDeviceTelemetryItem(BaseModel):
+    """One map-plotted device for client polling (inventory / reachability fingerprint)."""
+
+    id: int
+    synced_at_utc: str
+    state_changed_at_utc: str
+    reachability: str
+
+
+class MapDeviceTelemetryResponse(BaseModel):
+    devices: list[MapDeviceTelemetryItem]
+
+
+class LiveSdWanInterfaceRow(BaseModel):
+    """One row in the live interface table (device detail polling)."""
+
+    interface: str
+    ip: str
+    vrf: str
+    detail: str
+
+
+class LiveSdWanCellularTable(BaseModel):
+    """Tabular block from Manager cellular/WAN dataservice (live polling)."""
+
+    title: str
+    columns: list[str] = Field(default_factory=list)
+    rows: list[list[str]] = Field(default_factory=list)
+
+
+class LiveSdWanDeviceResponse(BaseModel):
+    """Live Manager snapshot for one synced device (non-blocking HTML; used by polling fetch)."""
+
+    ok: bool
+    fetched_at: str | None = None
+    note: str | None = None
+    interfaces: list[LiveSdWanInterfaceRow] = Field(default_factory=list)
+    cellular_tables: list[LiveSdWanCellularTable] = Field(default_factory=list)
