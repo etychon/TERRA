@@ -45,12 +45,16 @@ htmlcov/
 .env.*
 !.env.example
 
+# Local-only (e.g. scripts/launch-terra-debug.sh writes TERRA_DEBUG_TOKEN here for tooling)
+.run/
+
 # Jupyter
 .ipynb_checkpoints/
 
 # Data artifacts (keep structure, ignore heavy local dumps)
 data/raw/**
 data/processed/**
+data/*.db
 !data/**/.gitkeep
 
 # Model artifacts
@@ -65,3 +69,8 @@ logs/
 # Node / frontend
 node_modules/
 frontend/node_modules/
+
+# Docker Compose TLS (self-signed or external; never commit keys)
+docker/certs/server.crt
+docker/certs/server.key
+docker/certs/*.pem

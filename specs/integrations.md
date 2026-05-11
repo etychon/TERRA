@@ -18,6 +18,7 @@
 
 ## Third-party / infra
 
+- **Local / demo runtime:** the runnable stack is delivered via **`docker compose up --build -d`** from the repo root (`docker-compose.yml`). The **default WebUI** is **HTTPS on port 4434** with a **self-signed** cert unless `docker/certs/` contains operator-supplied PEMs; any new dependency service (cache, broker, tile proxy) must be reflected in Compose when required for default operation.
 - Maps for GPS require a **tile provider policy** (privacy, cost, air-gapped customers) — decide before embedding vendor SDKs.
 
 ## Considered / discarded

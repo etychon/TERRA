@@ -1,0 +1,18 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 360 64" role="img" aria-label="TERRA">
+  <defs>
+    <linearGradient id="terra-wordmark-grad" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#1d4ed8" />
+      <stop offset="42%" stop-color="#06b6d4" />
+      <stop offset="100%" stop-color="#a3e635" />
+    </linearGradient>
+  </defs>
+  <text
+    x="4"
+    y="48"
+    font-family="system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif"
+    font-size="52"
+    font-weight="800"
+    letter-spacing="0.12em"
+    fill="url(#terra-wordmark-grad)"
+  >TERRA</text>
+</svg>

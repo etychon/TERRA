@@ -2,6 +2,8 @@
 
 > **Audience:** coding agents and LLM-assisted workflows. This file is dense and intentionally overlaps only minimally with `README.md` and `specs/`. Humans should prefer `README.md` + `specs/`.
 
+> **Mandatory default run:** from repo root, **`docker compose up --build -d`** — then **`https://localhost:4434`** (TLS via `web` → `api`; override host port with `TERRA_HTTPS_PORT` in `.env`). Default TLS is **self-signed** unless `docker/certs/server.crt` and `server.key` are supplied. Do not document or implement a different “official” bring-up path without updating this file, `README.md`, `AGENTS.md`, and `specs/architecture.md` in the same change.
+
 ## Codename and positioning
 
 - **Product codename:** TERRA — *Dashboard Telemetry for Edge and Remote Routable Assets*.
@@ -27,14 +29,15 @@ Surface **compact** device cards or equivalents, not Manager clone screens:
 
 ## UI stack, design system, and AI ergonomics
 
-**Single source of truth:** `specs/design-system.md` is the product-level spec; **`frontend/src/tokens/`** + **`frontend/src/styles/globals.css`** are the implementation SSOT for visual consistency across **every** dashboard touchpoint (app shell, tables, maps, auth, emails if rendered from the same stack, etc.).
+**Single source of truth:** `specs/design-system.md` is the product-level spec. **`frontend/src/tokens/`** + **`frontend/src/styles/globals.css`** are the SSOT for the **TypeScript / Tailwind** dashboard. **`src/terra/static/css/terra-auth.css`** (+ page-specific CSS such as **`terra-devices.css`**) are the SSOT for **server-rendered** Jinja UI; keep tokens, shape scale, and Cisco hue rules aligned across both.
 
 ### Visual language
 
+- **Material Design 3:** follow M3 for **typography** (Roboto / Roboto Mono **self-hosted** under `src/terra/static/fonts/`, loaded via `terra-fonts.css` from `base.html` — no Google Fonts at runtime), **shape** (`--md-sys-shape-corner-*`, pill buttons, rounded cards/surfaces), **elevation / surface roles** (surface containers for chrome, headers, and data tables), and **button variants** (filled, outlined, filled tonal). Canonical reference: [Material Design 3](https://m3.material.io/). Product rules still live in `specs/design-system.md`.
 - **Cisco brand:** apply **Cisco’s official color palette** and **logo** per Brand Center (no unofficial logo marks in production). Token **names** are semantic; **values** in `primitives.ts` must be reconciled with Brand Center swatches before GA.
 - **Banned hues:** **do not use purple or indigo** (includes Tailwind `purple-*`, `indigo-*`, `violet-*`, `fuchsia-*`) unless an approved exception is recorded in `specs/design-system.md`. Same rule in **CSS and TS** outside sanctioned primitive definitions.
 - **Nature palettes:** secondary ramps may be **generated as unique ramps from nature references** (e.g. tide, basalt, lichen) while staying inside approved hue families and **contrast-first** constraints (WCAG-minded pairing for text vs surface).
-- **Dark theme:** required. **Theme = CSS custom properties** on `:root` and `.dark` in `globals.css`; **no JavaScript requirement** for switching theme colors (browser owns variables; root `class="dark"` toggles dark set).
+- **Dark theme:** required. **Theme = CSS custom properties** on `:root` and `.dark` in `globals.css`; **no JavaScript requirement** for switching theme colors (browser owns variables; root `class="dark"` toggles dark set). **Server-rendered** pages use the same HSL-variable pattern in `src/terra/static/css/terra-auth.css`.
 - **Motion:** allow **slow pulsating color gradients** on decorative layers only; always provide **`prefers-reduced-motion`** safe reduction (static or nearly static).
 - **Density:** UI is **dense**; use the **8px spacing scale** (`8, 16, 24, 32, 40, 48, …`) as the primary rhythm, with a **4px sub-grid** only for micro alignment.
 
@@ -63,7 +66,23 @@ Agents must run **`cd frontend && npm run lint`** (or rely on pre-commit / CI) b
 
 ## Delivery: Docker Compose and portability (mandatory)
 
-The **delivered runnable application** (services, backing stores, and the app’s default “bring up the stack” path) **must** be orchestrated with **Docker Compose** so operators and developers share one obvious entrypoint (`docker compose up` or the documented equivalent).
+The **delivered runnable application** (services, backing stores, and the app’s default “bring up the stack” path) **must** be orchestrated with **Docker Compose** so operators and developers share one obvious entrypoint.
+
+### Canonical bootstrap (enforced)
+
+From the **repository root**, the **primary** way to run the stack is a **single command**:
+
+```bash
+docker compose up --build -d
+```
+
+After images build, open **`https://localhost:4434`** (or `TERRA_HTTPS_PORT` from `.env`). **TLS:** self-signed by default (generated under `docker/certs/` on first run); replace with **externally issued** PEMs (`server.crt`, `server.key`) as documented in `docker/certs/README.md`. **Health:** `GET /health` on the HTTPS edge (Compose healthchecks use `curl -k` against the `web` service).
+
+- **Do not** position `pip install`, `venv`, or `terra-serve` as the default operator runbook in docs, README opening, or agent guidance—those are **contributor / CI** paths unless explicitly labeled “local Python development.”
+- **New runnable services or daemons** (APIs, workers, databases, edge proxies) **must** be wired into `docker-compose.yml` (or an included Compose file) in the **same PR** as the code that introduces them, with **healthchecks** where applicable and **documented ports / env** in `README.md` + this file.
+- **CI** must validate Compose configuration (e.g. `docker compose config`) so broken Compose cannot merge silently.
+
+The legacy standalone binary `docker-compose` (hyphen) may exist on older hosts; the documented command is **`docker compose`** (Docker CLI plugin).
 
 **CPU architectures:** images and Compose definitions **must** support **both**:
 
@@ -78,7 +97,7 @@ Use **multi-arch base images** and/or explicit `platform` policies only where ne
 - **Linux** (common distributions used in dev and small on-prem footprints).
 - **Windows** (via **Docker Desktop** / WSL2-backed engine as the supported model; document this expectation).
 
-**Agent implementation hints:** avoid host-specific bind mounts and path assumptions that break Windows or macOS file sharing; document any **privileged** ports, **localhost** vs `host.docker.internal` differences, and line-ending or volume-permission caveats in `README.md` / `AGENTS.md` when Compose files land. CI should validate Compose **config** (e.g. `docker compose config`) on **Linux amd64** at minimum; add **arm64** coverage in CI when runners are available.
+**Agent implementation hints:** avoid host-specific bind mounts and path assumptions that break Windows or macOS file sharing; document any **privileged** ports, **localhost** vs `host.docker.internal` differences, and line-ending or volume-permission caveats in `README.md` / `AGENTS.md` when adding services. CI **must** validate Compose **config** (`docker compose config` in `.github/workflows/ci.yml`); add **arm64** image build coverage when runners are available.
 
 ## Explicit non-goals (current)
 
@@ -97,8 +116,10 @@ Use **multi-arch base images** and/or explicit `platform` policies only where ne
 - **`specs/`:** keep short; update with behavioral PRs. **`specs/design-system.md`** owns UI SSOT rules.
 - **`frontend/`:** dashboard UI, Tailwind + shadcn-oriented setup, **tokens** (`src/tokens/`), **globals.css**, ESLint design guardrails.
 - **`.cursor/skills/terra-ui-design-system/`:** Cursor **SKILL** for agents implementing UI (loads detailed guardrails + file paths).
-- **`src/`:** future backend / shared services (non-UI Python or other); UI stays under `frontend/` unless monorepo layout changes (if it does, update this file and `specs/architecture.md` together).
-- **`tests/`:** unit, integration, smoke; smoke proves “wires connected” (app boots, health endpoint) once an app exists.
+- **`src/terra/`:** FastAPI backend (auth, RBAC, APIs); **must** remain reachable via the Compose `api` service and `/health`.
+- **`docker-compose.yml` + `Dockerfile` + `docker/web/`:** mandatory operator entrypoint; **HTTPS on host port 4434** by default (`web` nginx terminates TLS; `api` is internal HTTP). Keep defaults dev-safe and document production overrides (`TERRA_SECRET_KEY`, external certs in `docker/certs/`, etc.).
+- **`frontend/`:** dashboard design-system package (tokens, lint); when a **runnable** SPA or static server is added, it **must** ship in Compose alongside `api` (same single `docker compose up` story).
+- **`tests/`:** unit, integration, smoke; smoke proves “wires connected” (Compose files present; app boots; **`GET /health`** when the API test client is used).
 - **`notebooks/`:** exploratory only; not production paths.
 - **`data/`:** fixtures and anonymized samples only.
 - **`models/`:** optional ML artifacts or JSON schema bundles — not required for MVP dashboard.

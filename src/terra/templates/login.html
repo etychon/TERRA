@@ -1,0 +1,42 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="terra-card">
+  <div class="terra-card-accent" aria-hidden="true"></div>
+  <div class="terra-card-inner">
+    <div class="terra-login-brand">
+      <img
+        class="terra-login-logo"
+        src="/static/brand/terra-logo.svg"
+        width="280"
+        height="50"
+        alt="TERRA"
+      />
+      <p class="terra-login-tagline">Telemetry for Edge and Remote Routable Assets</p>
+    </div>
+    <p class="terra-lead"><strong>Telemetry dashboard</strong> — sign in with your operator account to continue.</p>
+    {% if error %}
+    <div class="terra-alert terra-alert-error" role="alert">{{ error }}</div>
+    {% endif %}
+    <form method="post" action="/auth/login" autocomplete="on">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
+      <div class="terra-field">
+        <label for="email">Email</label>
+        <input id="email" name="email" type="email" required autocomplete="username" placeholder="you@example.com" />
+      </div>
+      <div class="terra-field">
+        <label for="password">Password</label>
+        <input id="password" name="password" type="password" required autocomplete="current-password" />
+      </div>
+      <button class="terra-btn" type="submit">Sign in</button>
+    </form>
+    <div class="terra-links">
+      <a href="/auth/forgot-password">Forgot password?</a>
+    </div>
+    <p class="terra-footnote">
+      New accounts are created by an administrator after sign-in. Official marks must follow
+      <a href="https://www.cisco.com/c/en/us/about/branding.html" rel="noopener noreferrer">Cisco Brand</a>
+      guidelines in production.
+    </p>
+  </div>
+</div>
+{% endblock %}

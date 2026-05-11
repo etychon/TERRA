@@ -1,0 +1,1010 @@
+/**
+ * TERRA server-rendered UI — Material Design 3 structure (shape, type scale, state layers)
+ * with Cisco-aligned semantic colors (HSL triplets). No purple/indigo ramps.
+ * Mirrors `frontend/src/styles/globals.css` `.dark` where practical; see `specs/design-system.md`.
+ */
+:root,
+.dark {
+  color-scheme: dark;
+  /* M3 shape tokens (dp → rem at 1rem = 16px) */
+  --md-sys-shape-corner-extra-small: 0.25rem;
+  --md-sys-shape-corner-small: 0.5rem;
+  --md-sys-shape-corner-medium: 0.75rem;
+  --md-sys-shape-corner-large: 1rem;
+  --md-sys-shape-corner-extra-large: 1.75rem;
+  --md-sys-shape-corner-full: 624.9375rem;
+  --radius: var(--md-sys-shape-corner-large);
+  --md-sys-elevation-1: 0 1px 2px hsl(215 50% 2% / 0.45);
+  --md-sys-elevation-2: 0 1px 2px hsl(215 50% 2% / 0.35), 0 2px 6px hsl(215 50% 2% / 0.28);
+  --background: 215 45% 7%;
+  --foreground: 210 30% 92%;
+  --card: 215 42% 10%;
+  --card-foreground: 210 30% 92%;
+  --primary: 192 100% 46%;
+  --primary-foreground: 215 45% 8%;
+  --muted: 215 28% 14%;
+  --muted-foreground: 210 12% 72%;
+  --border: 215 28% 18%;
+  --input: 215 28% 18%;
+  --ring: 192 100% 46%;
+  --brand-wave-a: 192 100% 48%;
+  --brand-wave-b: 200 90% 38%;
+  --destructive: 4 68% 48%;
+  --surface-container-lowest: 215 45% 7%;
+  --surface-container-low: 215 42% 9%;
+  --surface-container: 215 40% 11%;
+  --surface-container-high: 215 36% 14%;
+  --surface-container-highest: 215 32% 17%;
+}
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  min-height: 100%;
+  font-family: Roboto, system-ui, -apple-system, "Segoe UI", "Helvetica Neue", Arial, sans-serif;
+  font-feature-settings: "kern" 1, "liga" 1;
+  font-size: 0.875rem;
+  line-height: 1.25rem;
+  background-color: hsl(var(--background));
+  color: hsl(var(--foreground));
+  -webkit-font-smoothing: antialiased;
+}
+
+body.terra-site-body {
+  display: flex;
+  flex-direction: column;
+  min-height: 100dvh;
+}
+
+.terra-site-header {
+  --terra-site-header-h: 4rem;
+  position: sticky;
+  top: 0;
+  z-index: 100;
+  flex-shrink: 0;
+  min-height: var(--terra-site-header-h);
+  border-bottom: 1px solid hsl(var(--border) / 0.6);
+  background: hsl(var(--surface-container) / 0.88);
+  backdrop-filter: blur(12px);
+  box-shadow: var(--md-sys-elevation-1);
+}
+
+.terra-header-inner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  max-width: min(100%, 90rem);
+  margin: 0 auto;
+  padding: 0.5rem 1rem 0.5rem 1.25rem;
+  min-height: var(--terra-site-header-h);
+}
+
+.terra-header-brand {
+  display: flex;
+  align-items: center;
+  text-decoration: none;
+  line-height: 0;
+}
+
+.terra-header-brand:focus-visible {
+  outline: 2px solid hsl(var(--ring));
+  outline-offset: 3px;
+  border-radius: 4px;
+}
+
+.terra-header-logo {
+  display: block;
+  height: 2.25rem;
+  width: auto;
+  max-width: min(12rem, 42vw);
+  object-fit: contain;
+}
+
+.terra-header-nav {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 0.5rem 1rem;
+  font-size: 0.8125rem;
+}
+
+.terra-header-nav a {
+  color: hsl(var(--primary));
+  text-decoration: none;
+  font-weight: 500;
+  font-size: 0.875rem;
+  line-height: 1.25rem;
+  letter-spacing: 0.00625rem;
+  border-radius: var(--md-sys-shape-corner-full);
+  padding: 0.375rem 0.75rem;
+}
+
+.terra-header-nav a:hover {
+  background: hsl(var(--primary) / 0.12);
+  text-decoration: none;
+}
+
+.terra-header-nav a:focus-visible {
+  outline: 2px solid hsl(var(--ring));
+  outline-offset: 2px;
+  border-radius: 2px;
+}
+
+.terra-header-user {
+  color: hsl(var(--muted-foreground));
+  font-size: 0.75rem;
+  max-width: 14rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.terra-header-crumb {
+  font-size: 0.75rem;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: hsl(var(--foreground));
+}
+
+.terra-site-main {
+  position: relative;
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.terra-auth-shell {
+  position: relative;
+  z-index: 1;
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 2rem 1rem;
+}
+
+/* Logged-in app (sidebar): fill viewport width/height — no centered “card window”. */
+.terra-site-body--app .terra-header-inner {
+  max-width: none;
+  width: 100%;
+}
+
+.terra-auth-shell--app {
+  align-items: stretch;
+  justify-content: flex-start;
+  width: 100%;
+  min-height: 0;
+  padding: 1rem 1.25rem 1.5rem;
+}
+
+.terra-auth-shell--app .terra-card-wide {
+  max-width: none;
+  width: 100%;
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.terra-auth-shell--app .terra-card-inner {
+  flex: 1 1 auto;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.terra-auth-shell--app #terra-devices-table {
+  flex: 1 1 auto;
+  min-height: 22rem;
+}
+
+.terra-auth-shell--app .terra-compare-grid {
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+.terra-site-body--app .terra-table-clip {
+  max-width: min(42rem, 55vw);
+}
+
+.terra-site-main > .terra-ambient-surface {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+  background-color: hsl(var(--background));
+  background-image: linear-gradient(
+    125deg,
+    hsl(var(--brand-wave-a) / 0.22) 0%,
+    hsl(var(--brand-wave-b) / 0.12) 45%,
+    hsl(var(--brand-wave-a) / 0.18) 100%
+  );
+  background-size: 220% 220%;
+  animation: terra-gradient-drift 22s ease-in-out infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .terra-site-main > .terra-ambient-surface {
+    animation: none;
+    opacity: 0.85;
+  }
+}
+
+@keyframes terra-gradient-drift {
+  0% {
+    background-position: 0% 50%;
+  }
+  50% {
+    background-position: 100% 40%;
+  }
+  100% {
+    background-position: 0% 50%;
+  }
+}
+
+.terra-card {
+  position: relative;
+  z-index: 2;
+  width: 100%;
+  max-width: 26rem;
+  padding: 0;
+  border-radius: var(--md-sys-shape-corner-extra-large);
+  background: hsl(var(--surface-container-low) / 0.98);
+  border: 1px solid hsl(var(--border) / 0.55);
+  box-shadow: var(--md-sys-elevation-2);
+  overflow: hidden;
+}
+
+.terra-card-inner {
+  padding: 1.5rem 1.5rem 1.75rem;
+}
+
+.terra-card-accent {
+  height: 4px;
+  background: linear-gradient(
+    90deg,
+    hsl(var(--brand-wave-b)) 0%,
+    hsl(var(--primary)) 45%,
+    hsl(var(--brand-wave-a)) 100%
+  );
+}
+
+.terra-brand-row {
+  display: flex;
+  align-items: baseline;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+}
+
+.terra-wordmark {
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  font-size: 1.25rem;
+  text-transform: uppercase;
+  color: hsl(var(--primary));
+}
+
+.terra-product-line {
+  font-size: 0.75rem;
+  font-weight: 500;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: hsl(var(--muted-foreground));
+}
+
+.terra-lead {
+  margin: 1rem 0 0;
+  font-size: 1rem;
+  font-weight: 400;
+  line-height: 1.5rem;
+  letter-spacing: 0.009375rem;
+  color: hsl(var(--muted-foreground));
+}
+
+.terra-sub {
+  margin-top: 0.25rem;
+  font-size: 0.875rem;
+  font-weight: 400;
+  line-height: 1.25rem;
+  letter-spacing: 0.015625rem;
+  color: hsl(var(--muted-foreground));
+}
+
+.terra-field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.375rem;
+  margin-top: 1rem;
+}
+
+.terra-field label {
+  font-size: 0.75rem;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  color: hsl(var(--muted-foreground));
+}
+
+.terra-field input {
+  border-radius: var(--md-sys-shape-corner-extra-small);
+  border: 1px solid hsl(var(--input));
+  padding: 0.75rem 1rem;
+  font-size: 1rem;
+  line-height: 1.5rem;
+  font-weight: 400;
+  background: hsl(var(--surface-container-lowest) / 0.95);
+  color: hsl(var(--foreground));
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.terra-field input::placeholder {
+  color: hsl(var(--muted-foreground) / 0.65);
+}
+
+.terra-field input:hover {
+  border-color: hsl(var(--primary) / 0.35);
+}
+
+.terra-field input:focus {
+  outline: none;
+  border-color: hsl(var(--primary) / 0.55);
+  box-shadow: 0 0 0 3px hsl(var(--ring) / 0.25);
+}
+
+/* M3 buttons + terminal-style label glow (fixed panel gradient; motion on text only) */
+@keyframes terra-btn-terminal-text {
+  0%,
+  100% {
+    text-shadow:
+      0 0 6px hsl(168 100% 45% / 0.35),
+      0 0 14px hsl(192 100% 50% / 0.18);
+    opacity: 1;
+  }
+  50% {
+    text-shadow:
+      0 0 12px hsl(165 100% 52% / 0.65),
+      0 0 22px hsl(192 100% 55% / 0.32);
+    opacity: 0.96;
+  }
+}
+
+@keyframes terra-btn-danger-terminal-text {
+  0%,
+  100% {
+    text-shadow:
+      0 0 6px hsl(350 100% 55% / 0.35),
+      0 0 12px hsl(4 90% 48% / 0.22);
+    opacity: 1;
+  }
+  50% {
+    text-shadow:
+      0 0 12px hsl(348 100% 62% / 0.55),
+      0 0 20px hsl(4 85% 50% / 0.28);
+    opacity: 0.96;
+  }
+}
+
+.terra-btn {
+  margin-top: 1.35rem;
+  width: 100%;
+  min-height: 2.5rem;
+  border: none;
+  border-radius: var(--md-sys-shape-corner-full);
+  padding: 0.625rem 1.5rem;
+  font-family: inherit;
+  font-weight: 500;
+  font-size: 0.875rem;
+  line-height: 1.25rem;
+  letter-spacing: 0.04em;
+  cursor: pointer;
+  background: linear-gradient(
+    145deg,
+    hsl(218 46% 11%) 0%,
+    hsl(202 40% 13%) 40%,
+    hsl(188 42% 12%) 100%
+  );
+  color: hsl(168 78% 84%);
+  box-shadow:
+    var(--md-sys-elevation-1),
+    inset 0 1px 0 hsl(168 35% 40% / 0.12);
+  text-shadow: 0 0 8px hsl(168 100% 45% / 0.25);
+  transition:
+    box-shadow 0.15s ease,
+    transform 0.08s ease,
+    filter 0.15s ease;
+  animation: terra-btn-terminal-text 2.2s ease-in-out infinite;
+}
+
+.terra-btn:hover:not(:disabled) {
+  box-shadow:
+    var(--md-sys-elevation-2),
+    inset 0 1px 0 hsl(168 40% 50% / 0.18);
+  filter: brightness(1.05);
+}
+
+.terra-btn:active:not(:disabled) {
+  transform: translateY(0.5px);
+}
+
+.terra-btn:disabled {
+  opacity: 0.38;
+  cursor: not-allowed;
+  box-shadow: none;
+  animation: none;
+  text-shadow: none;
+  filter: none;
+}
+
+.terra-btn--inline {
+  margin-top: 0;
+  width: auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.terra-btn--filled {
+  background: linear-gradient(
+    135deg,
+    hsl(215 44% 10%) 0%,
+    hsl(198 46% 14%) 48%,
+    hsl(185 50% 13%) 100%
+  );
+  color: hsl(166 85% 86%);
+}
+
+.terra-btn--outlined {
+  background: linear-gradient(165deg, hsl(215 38% 9%) 0%, hsl(215 34% 7%) 100%);
+  color: hsl(168 82% 80%);
+  border: 1px solid hsl(168 42% 30%);
+  box-shadow: inset 0 1px 0 hsl(168 28% 22% / 0.35);
+}
+
+.terra-btn--outlined:hover:not(:disabled) {
+  background: linear-gradient(165deg, hsl(215 36% 11%) 0%, hsl(210 32% 9%) 100%);
+  border-color: hsl(168 55% 42%);
+  filter: brightness(1.06);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .terra-btn,
+  .terra-btn-secondary,
+  .terra-btn-small,
+  .terra-btn-danger {
+    animation: none !important;
+  }
+}
+
+.terra-links {
+  margin-top: 1.35rem;
+  padding-top: 1.25rem;
+  border-top: 1px solid hsl(var(--border));
+  font-size: 0.8125rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.terra-links a {
+  color: hsl(var(--primary));
+  text-decoration: none;
+  font-weight: 500;
+}
+
+.terra-links a:hover {
+  text-decoration: underline;
+}
+
+.terra-links a:focus-visible {
+  outline: 2px solid hsl(var(--ring));
+  outline-offset: 2px;
+  border-radius: 2px;
+}
+
+.terra-footnote {
+  margin-top: 1.5rem;
+  padding-top: 1rem;
+  border-top: 1px solid hsl(var(--border) / 0.65);
+  font-size: 0.75rem;
+  line-height: 1.45;
+  color: hsl(var(--muted-foreground));
+}
+
+.terra-footnote a {
+  color: hsl(var(--primary));
+  text-decoration: none;
+  font-weight: 500;
+}
+
+.terra-footnote a:hover {
+  text-decoration: underline;
+}
+
+.terra-alert {
+  margin-top: 1rem;
+  padding: 0.625rem 0.75rem;
+  border-radius: calc(var(--radius) - 4px);
+  font-size: 0.875rem;
+}
+
+.terra-alert-error {
+  background: hsl(var(--destructive) / 0.15);
+  border: 1px solid hsl(var(--destructive) / 0.35);
+  color: hsl(var(--foreground));
+}
+
+.terra-alert-info {
+  background: hsl(var(--primary) / 0.12);
+  border: 1px solid hsl(var(--primary) / 0.35);
+}
+
+.terra-card-wide {
+  max-width: 52rem;
+}
+
+.terra-detail-list {
+  list-style: none;
+  padding: 0;
+  margin: 1rem 0 0;
+}
+
+.terra-detail-list li {
+  padding: 0.35rem 0;
+  border-bottom: 1px solid hsl(var(--border) / 0.5);
+  font-size: 0.875rem;
+  color: hsl(var(--muted-foreground));
+}
+
+.terra-detail-list li:last-child {
+  border-bottom: none;
+}
+
+.terra-detail-list strong {
+  color: hsl(var(--foreground));
+  font-weight: 600;
+}
+
+.terra-login-brand {
+  margin-bottom: 1.25rem;
+  padding-bottom: 1rem;
+  border-bottom: 1px solid hsl(var(--border) / 0.6);
+}
+
+.terra-login-logo {
+  display: block;
+  height: 2.75rem;
+  width: auto;
+  max-width: 100%;
+}
+
+.terra-login-tagline {
+  margin: 0.65rem 0 0;
+  font-size: 0.75rem;
+  font-weight: 500;
+  line-height: 1.35;
+  letter-spacing: 0.02em;
+  color: hsl(var(--muted-foreground));
+}
+
+.terra-links-row {
+  flex-direction: row;
+  flex-wrap: wrap;
+  gap: 1rem 1.25rem;
+}
+
+/* M3 title-medium — section headings (no forced all-caps) */
+.terra-section-title {
+  margin: 1.5rem 0 0.5rem;
+  font-size: 1rem;
+  font-weight: 500;
+  line-height: 1.5rem;
+  letter-spacing: 0.009375rem;
+  text-transform: none;
+  color: hsl(var(--foreground));
+}
+
+.terra-section-title:first-of-type {
+  margin-top: 0.5rem;
+}
+
+.terra-admin-form {
+  margin-bottom: 0.5rem;
+}
+
+.terra-field-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 1rem;
+}
+
+.terra-field-inline {
+  flex: 1 1 12rem;
+  margin-top: 0.75rem;
+}
+
+.terra-field-inline:first-child {
+  margin-top: 0.75rem;
+}
+
+.terra-role-fieldset {
+  margin: 1rem 0 0;
+  padding: 0.75rem 1rem;
+  border: 1px solid hsl(var(--border));
+  border-radius: calc(var(--radius) - 2px);
+}
+
+.terra-legend {
+  padding: 0 0.35rem;
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: hsl(var(--muted-foreground));
+}
+
+.terra-check,
+.terra-check-mini {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  margin-right: 1rem;
+  font-size: 0.8125rem;
+  color: hsl(var(--foreground));
+  cursor: pointer;
+}
+
+.terra-check-mini {
+  margin-right: 0.5rem;
+  font-size: 0.75rem;
+}
+
+.terra-check-super {
+  display: flex;
+  margin-top: 0.5rem;
+  font-size: 0.75rem;
+  color: hsl(var(--muted-foreground));
+}
+
+/* M3 filled tonal (secondary actions on forms) */
+.terra-btn-secondary {
+  margin-top: 1rem;
+  width: auto;
+  min-width: 10rem;
+  min-height: 2.5rem;
+  border-radius: var(--md-sys-shape-corner-full);
+  padding: 0.625rem 1.5rem;
+  font-weight: 500;
+  font-size: 0.875rem;
+  line-height: 1.25rem;
+  letter-spacing: 0.04em;
+  background: linear-gradient(145deg, hsl(215 32% 11%) 0%, hsl(215 28% 9%) 100%);
+  color: hsl(186 72% 78%);
+  border: 1px solid hsl(192 35% 22%);
+  box-shadow: inset 0 1px 0 hsl(192 30% 28% / 0.2);
+  text-shadow: 0 0 6px hsl(192 100% 45% / 0.25);
+  cursor: pointer;
+  animation: terra-btn-terminal-text 2.35s ease-in-out infinite;
+}
+
+.terra-btn-secondary:hover {
+  background: hsl(var(--surface-container-highest) / 0.85);
+  filter: none;
+}
+
+.terra-table-wrap {
+  margin-top: 0.5rem;
+  overflow-x: auto;
+  border: 1px solid hsl(var(--border) / 0.55);
+  border-radius: var(--md-sys-shape-corner-large);
+  box-shadow: var(--md-sys-elevation-1);
+}
+
+.terra-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.8125rem;
+}
+
+.terra-table th,
+.terra-table td {
+  padding: 0.65rem 0.75rem;
+  text-align: left;
+  border-bottom: 1px solid hsl(var(--border) / 0.7);
+  vertical-align: top;
+}
+
+.terra-table th {
+  font-size: 0.75rem;
+  font-weight: 500;
+  letter-spacing: 0.00625rem;
+  text-transform: none;
+  line-height: 1rem;
+  color: hsl(var(--muted-foreground));
+  background: hsl(var(--surface-container-high) / 0.75);
+}
+
+.terra-table tbody tr:last-child td {
+  border-bottom: none;
+}
+
+.terra-actions {
+  min-width: 14rem;
+}
+
+.terra-inline-form {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.35rem 0.5rem;
+  margin-bottom: 0.65rem;
+}
+
+.terra-inline-form:last-child {
+  margin-bottom: 0;
+}
+
+.terra-btn-small {
+  border: none;
+  border-radius: var(--md-sys-shape-corner-full);
+  padding: 0.375rem 0.75rem;
+  min-height: 2rem;
+  font-size: 0.75rem;
+  font-weight: 500;
+  line-height: 1rem;
+  letter-spacing: 0.04em;
+  cursor: pointer;
+  background: linear-gradient(145deg, hsl(215 36% 10%) 0%, hsl(200 34% 11%) 100%);
+  color: hsl(168 76% 80%);
+  box-shadow: inset 0 1px 0 hsl(168 25% 30% / 0.2);
+  text-shadow: 0 0 5px hsl(168 100% 42% / 0.3);
+  animation: terra-btn-terminal-text 2.25s ease-in-out infinite;
+}
+
+.terra-btn-small:hover:not(:disabled) {
+  background: linear-gradient(145deg, hsl(215 38% 12%) 0%, hsl(198 38% 13%) 100%);
+  filter: brightness(1.06);
+}
+
+.terra-btn-small:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+  animation: none;
+  text-shadow: none;
+  filter: none;
+}
+
+.terra-input-small {
+  min-width: 7rem;
+  flex: 1 1 6rem;
+  border-radius: 4px;
+  border: 1px solid hsl(var(--input));
+  padding: 0.35rem 0.5rem;
+  font-size: 0.75rem;
+  background: hsl(215 48% 6% / 0.85);
+  color: hsl(var(--foreground));
+}
+
+.terra-btn-danger {
+  border: 1px solid hsl(var(--destructive) / 0.45);
+  border-radius: 4px;
+  padding: 0.35rem 0.55rem;
+  font-size: 0.6875rem;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  cursor: pointer;
+  background: linear-gradient(145deg, hsl(350 28% 10%) 0%, hsl(4 32% 9%) 100%);
+  color: hsl(12 90% 88%);
+  text-shadow: 0 0 6px hsl(4 90% 50% / 0.25);
+  animation: terra-btn-danger-terminal-text 2.3s ease-in-out infinite;
+}
+
+.terra-btn-danger:hover:not(:disabled) {
+  background: hsl(var(--destructive) / 0.22);
+}
+
+.terra-btn-danger:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+  animation: none;
+  text-shadow: none;
+}
+
+.terra-badge {
+  display: inline-block;
+  margin-left: 0.25rem;
+  padding: 0.1rem 0.35rem;
+  font-size: 0.625rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  border-radius: 3px;
+  background: hsl(var(--primary) / 0.2);
+  color: hsl(var(--primary));
+}
+
+.terra-app-frame {
+  display: flex;
+  flex: 1;
+  flex-direction: row;
+  min-height: 0;
+  position: relative;
+  z-index: 1;
+}
+
+.terra-app-frame--with-sidebar .terra-app-stage {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.terra-sidebar {
+  width: 14.5rem;
+  flex-shrink: 0;
+  border-right: 1px solid hsl(var(--border) / 0.55);
+  background: hsl(var(--surface-container-low) / 0.72);
+  padding: 0.75rem 0 1rem;
+}
+
+.terra-sidebar-inner {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  padding: 0 0.75rem;
+}
+
+.terra-sidebar-link {
+  display: block;
+  padding: 0.625rem 1rem;
+  border-radius: var(--md-sys-shape-corner-full);
+  font-size: 0.875rem;
+  font-weight: 500;
+  line-height: 1.25rem;
+  letter-spacing: 0.00625rem;
+  color: hsl(var(--foreground));
+  text-decoration: none;
+}
+
+.terra-sidebar-link:hover {
+  background: hsl(var(--surface-container-highest) / 0.55);
+}
+
+.terra-sidebar-link.is-active {
+  background: hsl(var(--primary) / 0.16);
+  color: hsl(var(--primary));
+  font-weight: 500;
+}
+
+/* M3 headline-small */
+.terra-page-title {
+  margin: 0 0 0.5rem;
+  font-size: 1.5rem;
+  font-weight: 400;
+  line-height: 2rem;
+  letter-spacing: 0;
+  color: hsl(var(--foreground));
+}
+
+.terra-code {
+  font-family: "Roboto Mono", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+  font-size: 0.8125rem;
+  padding: 0.125rem 0.375rem;
+  border-radius: var(--md-sys-shape-corner-extra-small);
+  background: hsl(var(--surface-container-high) / 0.5);
+  color: hsl(var(--foreground));
+}
+
+.terra-muted {
+  color: hsl(var(--muted-foreground) / 0.75);
+}
+
+.terra-textarea {
+  width: 100%;
+  margin-top: 0.35rem;
+  border-radius: calc(var(--radius) - 2px);
+  border: 1px solid hsl(var(--input));
+  padding: 0.55rem 0.75rem;
+  font-size: 0.875rem;
+  font-family: inherit;
+  background: hsl(215 48% 6% / 0.85);
+  color: hsl(var(--foreground));
+  resize: vertical;
+  min-height: 4.5rem;
+}
+
+.terra-textarea:focus {
+  outline: none;
+  border-color: hsl(var(--primary) / 0.55);
+  box-shadow: 0 0 0 3px hsl(var(--ring) / 0.25);
+}
+
+.terra-table-mono {
+  font-family: "Roboto Mono", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+  font-size: 0.75rem;
+  word-break: break-all;
+}
+
+.terra-table-clip {
+  max-width: 14rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.terra-actions-narrow {
+  min-width: 9rem;
+}
+
+/* M3 assist chips (compact) + legacy .terra-status-* aliases */
+.terra-m3-chip,
+.terra-status {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 1.5rem;
+  padding: 0.125rem 0.625rem;
+  font-size: 0.75rem;
+  font-weight: 500;
+  line-height: 1rem;
+  letter-spacing: 0.00625rem;
+  text-transform: none;
+  border-radius: var(--md-sys-shape-corner-small);
+  border: none;
+  white-space: nowrap;
+}
+
+.terra-m3-chip--success,
+.terra-status--connected {
+  background: hsl(152 42% 22% / 0.85);
+  color: hsl(152 40% 88%);
+}
+
+.terra-m3-chip--neutral,
+.terra-status--unknown {
+  background: hsl(var(--surface-container-high) / 0.75);
+  color: hsl(var(--muted-foreground));
+}
+
+.terra-m3-chip--error,
+.terra-status--auth_failed {
+  background: hsl(var(--destructive) / 0.22);
+  color: hsl(4 55% 88%);
+}
+
+.terra-m3-chip--warning,
+.terra-status--unreachable {
+  background: hsl(38 55% 24% / 0.88);
+  color: hsl(38 70% 88%);
+}
+
+@media (max-width: 52rem) {
+  .terra-app-frame--with-sidebar {
+    flex-direction: column;
+  }
+
+  .terra-sidebar {
+    width: 100%;
+    border-right: none;
+    border-bottom: 1px solid hsl(var(--border));
+    padding: 0.75rem 0;
+  }
+
+  .terra-sidebar-inner {
+    flex-direction: row;
+    flex-wrap: wrap;
+    gap: 0.35rem;
+  }
+
+  .terra-sidebar-link {
+    flex: 1 1 auto;
+    text-align: center;
+  }
+}

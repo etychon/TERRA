@@ -1,0 +1,17 @@
+{% extends "base.html" %}
+{% block header_nav %}
+<a href="/auth/login">Sign in</a>
+{% endblock %}
+{% block content %}
+<div class="terra-card">
+  <div class="terra-card-accent" aria-hidden="true"></div>
+  <div class="terra-card-inner">
+    <p class="terra-lead"><strong>Email verification</strong></p>
+    {% if ok %}
+    <div class="terra-alert terra-alert-info" role="status">{{ message }}</div>
+    {% else %}
+    <div class="terra-alert terra-alert-error" role="alert">{{ message }}</div>
+    {% endif %}
+  </div>
+</div>
+{% endblock %}

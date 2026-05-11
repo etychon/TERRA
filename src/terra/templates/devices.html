@@ -1,0 +1,62 @@
+{% extends "base.html" %}
+{% block extra_head %}
+<link rel="stylesheet" href="/static/vendor/tabulator.min.css" />
+<link rel="stylesheet" href="/static/css/terra-devices.css" />
+{% endblock %}
+{% block header_nav %}
+<span class="terra-header-user" title="{{ user.email }}">{{ user.email }}</span>
+{% if is_admin %}
+<a href="/admin/users">User management</a>
+{% endif %}
+<a href="/docs">API docs</a>
+<a href="/auth/logout">Sign out</a>
+{% endblock %}
+{% block content %}
+<div class="terra-card terra-card-wide">
+  <div class="terra-card-accent" aria-hidden="true"></div>
+  <div class="terra-card-inner">
+    <p class="terra-lead">
+      Inventory is stored in <strong>UTC</strong>; times below use your <strong>browser time zone</strong>. Cisco Catalyst
+      SD-WAN Manager does not expose a standard server-push feed for full device lists to external apps — TERRA
+      refreshes on a timer and via <strong>Sync now</strong> (configurable <code class="terra-code">TERRA_SDWAN_SYNC_INTERVAL_SECONDS</code>).
+    </p>
+    <h2 class="terra-section-title">Devices across SD-WAN managers</h2>
+    <p class="terra-sub">
+      <strong>Short tap</strong> a row to open readable device details. <strong>Long-press</strong> (~0.5s) a row to
+      enter bulk mode (selection column appears); then tap rows or use checkboxes — selection is kept when you change
+      pages. Choose two or more devices and click <strong>Compare selected</strong>. Column order, visibility, and sort
+      are remembered (localStorage). <strong>Account</strong> and <strong>Type</strong> are hidden by default. Everyone
+      sees the full inventory; <strong>Account</strong> is the TERRA user who registered that SD-WAN Manager.
+    </p>
+    <div id="terra-devices-bulk-banner" class="terra-devices-bulk-banner" role="status" hidden>
+      <span>Bulk selection mode — tap rows to add or remove. Selection persists across pages.</span>
+      <button id="terra-devices-bulk-exit" type="button" class="terra-btn terra-btn--inline terra-btn--outlined">Done</button>
+    </div>
+    <div class="terra-devices-toolbar">
+      <button id="terra-devices-sync-btn" class="terra-btn terra-btn--inline terra-btn--filled" type="button">Sync now</button>
+      <button
+        id="terra-devices-compare-btn"
+        class="terra-btn terra-btn--inline terra-btn--outlined terra-devices-compare-btn"
+        type="button"
+      >
+        <span id="terra-devices-compare-label">Compare selected</span>
+      </button>
+      <p>
+        Reachability changes reset the “since status” clock. “Last inventory” is when TERRA last pulled this row from
+        Manager.
+      </p>
+    </div>
+    <script type="application/json" id="terra-devices-json">{{ devices_json | safe }}</script>
+    <div
+      id="terra-devices-table"
+      role="grid"
+      aria-label="Synced SD-WAN devices"
+      data-show-owner="{{ 'true' if show_device_owner else 'false' }}"
+    ></div>
+  </div>
+</div>
+{% endblock %}
+{% block extra_scripts %}
+<script src="/static/vendor/tabulator.min.js"></script>
+<script src="/static/js/terra-devices-home.js"></script>
+{% endblock %}

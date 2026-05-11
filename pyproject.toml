@@ -10,7 +10,19 @@ readme = "README.md"
 license = { text = "Cisco Sample Code License, Version 1.1" }
 requires-python = ">=3.11"
 authors = [{ name = "TERRA Contributors" }]
-dependencies = []
+dependencies = [
+  "argon2-cffi>=23.1.0",
+  "cryptography>=42.0.0",
+  "email-validator>=2.2.0",
+  "fastapi>=0.115.0",
+  "httpx>=0.27.0",
+  "itsdangerous>=2.2.0",
+  "jinja2>=3.1.4",
+  "pydantic-settings>=2.6.0",
+  "python-multipart>=0.0.12",
+  "sqlalchemy>=2.0.36",
+  "uvicorn[standard]>=0.32.0",
+]
 
 [project.optional-dependencies]
 dev = [
@@ -20,23 +32,40 @@ dev = [
   "mypy>=1.11",
 ]
 
+[project.scripts]
+terra-serve = "terra.cli:main"
+
 [tool.setuptools.packages.find]
 where = ["src"]
 namespaces = true
 
+[tool.setuptools.package-data]
+terra = [
+  "templates/*.html",
+  "static/**/*",
+]
+
 [tool.ruff]
 target-version = "py311"
-line-length = 100
+line-length = 115
 src = ["src", "tests"]
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "B", "UP", "SIM"]
 
+[tool.ruff.lint.per-file-ignores]
+"src/terra/deps.py" = ["B008"]
+"src/terra/routers/*.py" = ["B008"]
+
 [tool.mypy]
 python_version = "3.11"
 strict = true
 warn_unused_configs = true
-files = ["tests"]
+files = ["tests", "src/terra"]
+
+[[tool.mypy.overrides]]
+module = ["conftest", "test_auth", "test_smoke"]
+disallow_untyped_defs = false
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

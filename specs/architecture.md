@@ -17,6 +17,7 @@ Build a **multi-cluster monitoring dashboard** with **dashboard-owned authentica
 
 - **Operator UI** follows `specs/design-system.md` (Tailwind + shadcn-style CSS variables, token layers, automated guardrails) and ships with the same **Compose**-first story as the API services.
 - **Docker Compose** is the **mandatory** default way to run the delivered application stack (services, dependencies, documented `up` / `down` workflow).
+- **Canonical command (repo root):** `docker compose up --build -d` — brings up all defined services; default **user-facing WebUI** is **`https://localhost:4434`** (nginx TLS edge → FastAPI; avoids clashing with common **8000** usage). Override host port via `TERRA_HTTPS_PORT` in `.env`. Default certificate is **self-signed**; operators may drop **`server.crt` / `server.key`** PEMs into `docker/certs/` before start. Liveness: **`GET /health`** through the HTTPS edge.
 - **Platforms:** **macOS**, **Linux**, and **Windows** (support **Docker Desktop** with the WSL2-backed engine as the documented Windows model).
 - **CPU:** images and Compose must support **amd64** and **arm64** (including **Apple Silicon** Macs).
 

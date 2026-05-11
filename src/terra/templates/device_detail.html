@@ -1,0 +1,101 @@
+{% extends "base.html" %}
+{% block extra_head %}
+<link rel="stylesheet" href="/static/css/terra-devices.css" />
+{% endblock %}
+{% block header_nav %}
+<span class="terra-header-user" title="{{ user.email }}">{{ user.email }}</span>
+{% if is_admin %}
+<a href="/admin/users">User management</a>
+{% endif %}
+<a href="/devices">Devices</a>
+<a href="/docs">API docs</a>
+<a href="/auth/logout">Sign out</a>
+{% endblock %}
+{% block content %}
+<div class="terra-card terra-card-wide">
+  <div class="terra-card-accent" aria-hidden="true"></div>
+  <div class="terra-card-inner">
+    <p class="terra-lead"><a href="/devices">← Devices</a> · <a href="/">Home</a></p>
+    <h1 class="terra-page-title">{{ device.hostname or "Device" }}</h1>
+
+    <h2 class="terra-section-title">Inventory (TERRA)</h2>
+    <dl class="terra-dl-pretty">
+      <div class="terra-dl-pretty__row"><dt>Serial</dt><dd>{{ serial_display or "—" }}</dd></div>
+      <div class="terra-dl-pretty__row"><dt>Model</dt><dd>{{ device.model or "—" }}</dd></div>
+      <div class="terra-dl-pretty__row"><dt>Software</dt><dd>{{ device.software_version or "—" }}</dd></div>
+      <div class="terra-dl-pretty__row"><dt>Type</dt><dd>{{ device.device_type or "—" }}</dd></div>
+      <div class="terra-dl-pretty__row"><dt>Site</dt><dd>{{ device.site_id or "—" }}</dd></div>
+      <div class="terra-dl-pretty__row"><dt>Reachability</dt><dd>{{ device.reachability }}</dd></div>
+      <div class="terra-dl-pretty__row">
+        <dt>Status since (your time)</dt>
+        <dd><time class="terra-local-time" data-utc="{{ state_changed_iso }}">{{ state_changed_iso }}</time></dd>
+      </div>
+      <div class="terra-dl-pretty__row">
+        <dt>Last inventory (your time)</dt>
+        <dd><time class="terra-local-time" data-utc="{{ synced_iso }}">{{ synced_iso }}</time></dd>
+      </div>
+    </dl>
+
+    {% if interface_rows %}
+    <h2 class="terra-section-title">Network interfaces</h2>
+    <div class="terra-table-wrap terra-detail-if-table">
+      <table class="terra-table">
+        <thead>
+          <tr>
+            <th>Interface</th>
+            <th>IP</th>
+            <th>VRF</th>
+            <th>Notes</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for ir in interface_rows %}
+          <tr>
+            <td>{{ ir.interface }}</td>
+            <td>{{ ir.ip }}</td>
+            <td>{{ ir.vrf }}</td>
+            <td>{{ ir.detail }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% endif %}
+
+    {% if cellular_kv %}
+    <h2 class="terra-section-title">Cellular / RF / modem hints</h2>
+    <p class="terra-muted terra-detail-hint">
+      Fields detected from Manager JSON (paths vary by release). Cross-check with Manager UI when unsure.
+    </p>
+    <dl class="terra-dl-pretty">
+      {% for cv in cellular_kv %}
+      <div class="terra-dl-pretty__row"><dt>{{ cv.label }}</dt><dd><pre class="terra-kv-inline">{{ cv.value }}</pre></dd></div>
+      {% endfor %}
+    </dl>
+    {% endif %}
+
+    <h2 class="terra-section-title">Fields from Manager</h2>
+    <div class="terra-manager-fields">
+      {% for group in manager_field_groups %}
+      <h3 class="terra-detail-type-heading">{{ group.category }}</h3>
+      <div class="terra-detail-kv-stack">
+        {% for item in group.fields %}
+        <section class="terra-kv-card">
+          <h3 class="terra-kv-card__title">{{ item.label }}</h3>
+          <pre class="terra-kv-card__body">{{ item.value }}</pre>
+        </section>
+        {% endfor %}
+      </div>
+      {% else %}
+      <p class="terra-muted">No structured fields parsed.</p>
+      {% endfor %}
+    </div>
+
+    <h2 class="terra-section-title">Full JSON payload (from Manager)</h2>
+    <pre class="terra-json-pre" tabindex="0">{{ pretty_json }}</pre>
+  </div>
+</div>
+{% endblock %}
+{% block extra_scripts %}
+<script src="/static/js/terra-datetime-local.js"></script>
+{% endblock %}

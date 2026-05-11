@@ -1,0 +1,46 @@
+/**
+ * Self-hosted Material 3 typefaces (air-gapped friendly).
+ * Files and license: `static/fonts/README.md`.
+ */
+@font-face {
+  font-family: Roboto;
+  font-style: normal;
+  font-weight: 400;
+  font-stretch: 100%;
+  font-display: swap;
+  src: url("/static/fonts/roboto-v51-latin-400.ttf") format("truetype");
+}
+
+@font-face {
+  font-family: Roboto;
+  font-style: normal;
+  font-weight: 500;
+  font-stretch: 100%;
+  font-display: swap;
+  src: url("/static/fonts/roboto-v51-latin-500.ttf") format("truetype");
+}
+
+@font-face {
+  font-family: Roboto;
+  font-style: normal;
+  font-weight: 700;
+  font-stretch: 100%;
+  font-display: swap;
+  src: url("/static/fonts/roboto-v51-latin-700.ttf") format("truetype");
+}
+
+@font-face {
+  font-family: "Roboto Mono";
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url("/static/fonts/roboto-mono-v31-latin-400.ttf") format("truetype");
+}
+
+@font-face {
+  font-family: "Roboto Mono";
+  font-style: normal;
+  font-weight: 500;
+  font-display: swap;
+  src: url("/static/fonts/roboto-mono-v31-latin-500.ttf") format("truetype");
+}

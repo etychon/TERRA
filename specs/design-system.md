@@ -1,6 +1,14 @@
 # Design system (single source of truth)
 
-This file is the **canonical product spec** for TERRA visual and interaction consistency. Implementation lives under `frontend/` (tokens, `globals.css`, Tailwind, shadcn-style variables). Agents: also read `.cursor/skills/terra-ui-design-system/SKILL.md` and `LLM_CONTEXT.md` (UI stack section).
+This file is the **canonical product spec** for TERRA visual and interaction consistency. Implementation lives under `frontend/` (tokens, `globals.css`, Tailwind, shadcn-style variables) **and** server-rendered pages under `src/terra/static/css/` (`terra-auth.css`, `terra-devices.css`). Agents: also read `.cursor/skills/terra-ui-design-system/SKILL.md` and `LLM_CONTEXT.md` (UI stack section).
+
+## Material Design 3 (structure)
+
+TERRA UI follows **Material Design 3** for **interaction, shape, typography, and state layers** (see [Material Design 3](https://m3.material.io/)). Cisco brand rules below still govern **hue families and logo** usage.
+
+- **Type:** **Roboto** and **Roboto Mono**, **self-hosted** from `src/terra/static/fonts/` via `src/terra/static/css/terra-fonts.css` (linked in `base.html` before `terra-auth.css`). No runtime requests to Google Fonts. The dashboard package should mirror the same pairing if it ships webfonts.
+- **Shape:** corner tokens `--md-sys-shape-corner-*` and component radii (e.g. **full** for standard buttons, **large** for cards and data surfaces).
+- **Components:** buttons use M3 **filled** / **outlined** / **filled tonal** patterns; tables and chips use **surface container** hierarchy and **label** / **body** type roles—not legacy all-caps table chrome unless a specific spec requires it.
 
 ## Brand and trust
 

@@ -11,7 +11,13 @@
 @layer base {
   :root {
     color-scheme: light;
-    --radius: 0.625rem;
+    /* Material 3 shape — align with server-rendered `terra-auth.css` */
+    --md-sys-shape-corner-extra-small: 0.25rem;
+    --md-sys-shape-corner-small: 0.5rem;
+    --md-sys-shape-corner-medium: 0.75rem;
+    --md-sys-shape-corner-large: 1rem;
+    --md-sys-shape-corner-extra-large: 1.75rem;
+    --radius: var(--md-sys-shape-corner-large);
     --background: 210 40% 98%;
     --foreground: 215 35% 12%;
     --card: 210 38% 96%;
@@ -37,7 +43,7 @@
 
   .dark {
     color-scheme: dark;
-    --radius: 0.625rem;
+    --radius: var(--md-sys-shape-corner-large);
     --background: 215 45% 7%;
     --foreground: 210 30% 92%;
     --card: 215 42% 10%;

@@ -1,0 +1,63 @@
+/* Home dashboard map — Leaflet host + marker tones */
+
+.terra-home-map-wrap {
+  margin-top: 1rem;
+  border-radius: var(--md-sys-shape-corner-large);
+  border: 1px solid hsl(var(--border) / 0.55);
+  overflow: hidden;
+  background: hsl(var(--surface-container-low) / 0.55);
+  box-shadow: var(--md-sys-elevation-1);
+}
+
+.terra-home-map {
+  height: min(70vh, 36rem);
+  width: 100%;
+  z-index: 1;
+}
+
+.terra-home-map-note {
+  margin: 0.5rem 0 0;
+  font-size: 0.8125rem;
+  color: hsl(var(--muted-foreground));
+}
+
+.leaflet-popup-content-wrapper {
+  border-radius: var(--md-sys-shape-corner-medium) !important;
+  background: hsl(var(--card)) !important;
+  color: hsl(var(--foreground)) !important;
+  border: 1px solid hsl(var(--border) / 0.55);
+}
+
+.leaflet-popup-tip {
+  background: hsl(var(--card)) !important;
+}
+
+.terra-map-popup {
+  font-size: 0.8125rem;
+  line-height: 1.35;
+  min-width: 12rem;
+}
+
+.terra-map-popup strong {
+  display: block;
+  margin-bottom: 0.35rem;
+  font-size: 0.875rem;
+}
+
+.terra-map-marker-dot {
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  border: 2px solid hsl(215 45% 8%);
+  box-shadow: 0 0 10px hsl(168 100% 45% / 0.45);
+}
+
+.terra-map-marker-dot--online {
+  background: hsl(142 65% 42%);
+  box-shadow: 0 0 12px hsl(142 70% 48% / 0.55);
+}
+
+.terra-map-marker-dot--offline {
+  background: hsl(4 72% 48%);
+  box-shadow: 0 0 12px hsl(4 80% 45% / 0.45);
+}

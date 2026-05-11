@@ -1,0 +1,110 @@
+{% extends "base.html" %}
+{% block header_nav %}
+<a href="/">Home</a>
+<span class="terra-header-crumb">User management</span>
+<a href="/auth/logout">Sign out</a>
+{% endblock %}
+{% block content %}
+<div class="terra-card terra-card-wide">
+  <div class="terra-card-accent" aria-hidden="true"></div>
+  <div class="terra-card-inner">
+    <p class="terra-lead">Directory, roles, password resets, and removals. Requires the <strong>admin</strong> role.</p>
+
+    {% if request.query_params.get('created') %}
+    <div class="terra-alert terra-alert-info" role="status">User created.</div>
+    {% endif %}
+    {% if request.query_params.get('deleted') %}
+    <div class="terra-alert terra-alert-info" role="status">User removed.</div>
+    {% endif %}
+    {% if request.query_params.get('password') %}
+    <div class="terra-alert terra-alert-info" role="status">Password updated.</div>
+    {% endif %}
+    {% if request.query_params.get('roles') %}
+    <div class="terra-alert terra-alert-info" role="status">Roles updated.</div>
+    {% endif %}
+
+    <h2 class="terra-section-title">Directory</h2>
+    <div class="terra-admin-users-toolbar">
+      <button id="terra-show-add-user" type="button" class="terra-btn terra-btn--inline terra-btn--outlined">+ Add User</button>
+    </div>
+    <div class="terra-table-wrap">
+      <table class="terra-table">
+        <thead>
+          <tr>
+            <th>Email</th>
+            <th>Name</th>
+            <th>Active</th>
+            <th>Roles</th>
+            <th>Actions</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for u in users %}
+          <tr>
+            <td>{{ u.email }}{% if u.is_superuser %} <span class="terra-badge">superuser</span>{% endif %}</td>
+            <td>{{ u.display_name }}</td>
+            <td>{% if u.is_active %}yes{% else %}no{% endif %}</td>
+            <td>{% if u.roles %}{{ u.roles | join(", ") }}{% else %}—{% endif %}</td>
+            <td class="terra-actions">
+              <form class="terra-inline-form" method="post" action="/admin/users/{{ u.id }}/roles">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
+                <label class="terra-check-mini"><input type="checkbox" name="role_admin" value="on" {% if 'admin' in u.roles %}checked{% endif %} />admin</label>
+                <label class="terra-check-mini"><input type="checkbox" name="role_operator" value="on" {% if 'operator' in u.roles %}checked{% endif %} />op</label>
+                <label class="terra-check-mini"><input type="checkbox" name="role_viewer" value="on" {% if 'viewer' in u.roles %}checked{% endif %} />view</label>
+                <button class="terra-btn-small" type="submit">Save roles</button>
+              </form>
+              <form class="terra-inline-form" method="post" action="/admin/users/{{ u.id }}/password" onsubmit="return confirm('Reset password for {{ u.email }}?');">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
+                <input class="terra-input-small" name="new_password" type="password" required minlength="10" placeholder="New password" autocomplete="new-password" />
+                <button class="terra-btn-small" type="submit">Reset password</button>
+              </form>
+              <form class="terra-inline-form" method="post" action="/admin/users/{{ u.id }}/delete" onsubmit="return confirm('Permanently delete {{ u.email }}?');">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
+                <button class="terra-btn-danger" type="submit" {% if u.id == current_id %}disabled{% endif %}>Remove</button>
+              </form>
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+
+    <div id="terra-add-user-panel" class="terra-add-user-panel" hidden>
+      <h2 class="terra-section-title">Add user</h2>
+      <form class="terra-admin-form" method="post" action="/admin/users/create" autocomplete="off">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
+        <div class="terra-field-row">
+          <div class="terra-field terra-field-inline">
+            <label for="new_email">Email</label>
+            <input id="new_email" name="email" type="email" required placeholder="user@example.com" />
+          </div>
+          <div class="terra-field terra-field-inline">
+            <label for="new_display">Display name</label>
+            <input id="new_display" name="display_name" type="text" placeholder="Optional" />
+          </div>
+          <div class="terra-field terra-field-inline">
+            <label for="new_password">Initial password</label>
+            <input id="new_password" name="password" type="password" required minlength="10" autocomplete="new-password" />
+          </div>
+        </div>
+        <fieldset class="terra-role-fieldset">
+          <legend class="terra-legend">Roles</legend>
+          <label class="terra-check"><input type="checkbox" name="role_admin" value="on" /> admin</label>
+          <label class="terra-check"><input type="checkbox" name="role_operator" value="on" /> operator</label>
+          <label class="terra-check"><input type="checkbox" name="role_viewer" value="on" checked /> viewer</label>
+          {% if show_superuser_field %}
+          <label class="terra-check terra-check-super"><input type="checkbox" name="is_superuser" value="on" /> Superuser</label>
+          {% endif %}
+        </fieldset>
+        <div class="terra-add-user-actions">
+          <button class="terra-btn terra-btn-secondary" type="submit">Create user</button>
+          <button id="terra-cancel-add-user" type="button" class="terra-btn terra-btn--inline terra-btn--outlined">Cancel</button>
+        </div>
+      </form>
+    </div>
+  </div>
+</div>
+{% endblock %}
+{% block extra_scripts %}
+<script src="/static/js/terra-admin-users.js"></script>
+{% endblock %}

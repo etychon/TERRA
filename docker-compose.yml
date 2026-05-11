@@ -1,0 +1,50 @@
+# Canonical local / demo bootstrap — see README.md and LLM_CONTEXT.md.
+# Single command: docker compose up --build -d
+#
+# User-facing WebUI: HTTPS on host port 4434 (TLS at `web` → `api` on :8000 inside the network).
+services:
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: terra-sdwan-dashboard:local
+    expose:
+      - "8000"
+    environment:
+      TERRA_SECRET_KEY: ${TERRA_SECRET_KEY:-compose-default-dev-secret-32chars!!}
+      TERRA_ADMIN_EMAIL: ${TERRA_ADMIN_EMAIL:-admin@terra.local}
+      TERRA_ADMIN_PASSWORD: ${TERRA_ADMIN_PASSWORD:-ChangeMe!Admin-1st-login}
+      TERRA_DATABASE_URL: sqlite:////data/terra.db
+      TERRA_MAIL_MODE: ${TERRA_MAIL_MODE:-log}
+      TERRA_SESSION_COOKIE_SECURE: ${TERRA_SESSION_COOKIE_SECURE:-true}
+      TERRA_FORWARDED_ALLOW_IPS: ${TERRA_FORWARDED_ALLOW_IPS:-*}
+    volumes:
+      - terra_sqlite:/data
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8000/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+
+  web:
+    build:
+      context: ./docker/web
+      dockerfile: Dockerfile
+    image: terra-sdwan-dashboard-web:local
+    ports:
+      - "${TERRA_HTTPS_PORT:-4434}:443"
+    volumes:
+      - ./docker/certs:/etc/nginx/certs
+    depends_on:
+      api:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-fk", "https://127.0.0.1/health"]
+      interval: 20s
+      timeout: 5s
+      retries: 5
+      start_period: 25s
+
+volumes:
+  terra_sqlite: {}

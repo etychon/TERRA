@@ -53,3 +53,27 @@ def test_ui_skill_present() -> None:
         / "SKILL.md"
     )
     assert skill.is_file()
+
+
+def test_docker_compose_bootstrap_present() -> None:
+    assert (REPO_ROOT / "docker-compose.yml").is_file()
+    assert (REPO_ROOT / "Dockerfile").is_file()
+    assert (REPO_ROOT / ".env.example").is_file()
+    assert (REPO_ROOT / "docker" / "web" / "Dockerfile").is_file()
+    assert (REPO_ROOT / "docker" / "web" / "nginx.conf").is_file()
+    assert (REPO_ROOT / "docker" / "web" / "entrypoint.sh").is_file()
+    assert (REPO_ROOT / "docker" / "api" / "entrypoint.sh").is_file()
+
+
+def test_commit_workflow_files_present() -> None:
+    assert (REPO_ROOT / ".cursor" / "commands" / "commit.md").is_file()
+    script = (
+        REPO_ROOT
+        / ".cursor"
+        / "skills"
+        / "commit-public-repo"
+        / "scripts"
+        / "verify-public-ready.sh"
+    )
+    assert script.is_file()
+    assert (REPO_ROOT / ".cursor" / "skills" / "commit-public-repo" / "SKILL.md").is_file()

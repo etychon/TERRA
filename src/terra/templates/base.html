@@ -1,0 +1,54 @@
+<!DOCTYPE html>
+<html lang="en" class="dark">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>{{ title }}</title>
+    {# Material 3 typefaces — self-hosted under /static/fonts/ (air-gapped; see static/fonts/README.md). #}
+    <link rel="stylesheet" href="/static/css/terra-fonts.css" />
+    {# Root-relative URL avoids mixed-content blocking when the UI is served over HTTPS (e.g. nginx on :4434). #}
+    <link rel="stylesheet" href="/static/css/terra-auth.css" />
+    {% block extra_head %}{% endblock %}
+  </head>
+  <body class="terra-site-body{% if show_app_shell|default(false) %} terra-site-body--app{% endif %}">
+    <header class="terra-site-header">
+      <div class="terra-header-inner">
+        <a class="terra-header-brand" href="/">
+          <img
+            class="terra-header-logo"
+            src="/static/brand/terra-logo.png"
+            width="200"
+            height="48"
+            alt="TERRA"
+          />
+        </a>
+        <nav class="terra-header-nav" aria-label="Account">
+          {% block header_nav %}{% endblock %}
+        </nav>
+      </div>
+    </header>
+    <div class="terra-site-main">
+      <div class="terra-ambient-surface" aria-hidden="true"></div>
+      <div class="terra-app-frame{% if show_app_shell|default(false) %} terra-app-frame--with-sidebar{% endif %}">
+        {% if show_app_shell|default(false) %}
+        <aside class="terra-sidebar" aria-label="Primary navigation">
+          <div class="terra-sidebar-inner">
+            <a href="/" class="terra-sidebar-link{% if (nav_active|default('')) == 'home' %} is-active{% endif %}">Home</a>
+            <a href="/devices" class="terra-sidebar-link{% if (nav_active|default('')) == 'devices' %} is-active{% endif %}">Devices</a>
+            <a href="/administration/sd-wan" class="terra-sidebar-link{% if (nav_active|default('')) == 'sdwan' %} is-active{% endif %}">Administration</a>
+            {% if nav_is_admin|default(false) %}
+            <a href="/admin/users" class="terra-sidebar-link{% if (nav_active|default('')) == 'users' %} is-active{% endif %}">Users</a>
+            {% endif %}
+          </div>
+        </aside>
+        {% endif %}
+        <div class="terra-app-stage">
+          <div class="terra-auth-shell{% if show_app_shell|default(false) %} terra-auth-shell--app{% endif %}">
+            {% block content %}{% endblock %}
+          </div>
+        </div>
+      </div>
+    </div>
+    {% block extra_scripts %}{% endblock %}
+  </body>
+</html>

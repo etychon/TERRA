@@ -1,0 +1,21 @@
+# Opt-in diagnostics for local / lab Compose only (never deploy this overlay to production).
+#
+# Publishes the API debug port on the host (default all interfaces :18434 → e.g. http://192.168.x.x:18434/debug/*).
+# Set TERRA_DEBUG_HOST_BIND=127.0.0.1 to restrict to loopback only.
+# Requires a shared debug token (header X-Terra-Debug-Token or ?debug_token=).
+#
+#   export TERRA_DEBUG_TOKEN="$(openssl rand -hex 16)"
+#   docker compose -f docker-compose.yml -f docker-compose.debug.yml up --build -d
+#
+# Examples:
+#   ./scripts/launch-terra-debug.sh
+#   curl -sS -H "X-Terra-Debug-Token: $TERRA_DEBUG_TOKEN" "http://127.0.0.1:${TERRA_DEBUG_API_PORT:-18434}/debug/summary" | jq .
+#   curl ... "http://$(hostname -I | awk '{print $1}'):${TERRA_DEBUG_API_PORT:-18434}/debug/summary" | jq .
+#
+services:
+  api:
+    environment:
+      TERRA_DEBUG_EXPOSE_INTERNALS: "true"
+      TERRA_DEBUG_TOKEN: ${TERRA_DEBUG_TOKEN:-local-debug-token-change-me}
+    ports:
+      - "${TERRA_DEBUG_HOST_BIND:-0.0.0.0}:${TERRA_DEBUG_API_PORT:-18434}:8000"

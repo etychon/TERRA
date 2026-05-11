@@ -1,0 +1,56 @@
+{% extends "base.html" %}
+{% block extra_head %}
+<link rel="stylesheet" href="/static/css/terra-home.css" />
+{% if map_has_markers %}
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.css" crossorigin="" />
+{% endif %}
+{% endblock %}
+{% block header_nav %}
+<span class="terra-header-user" title="{{ user.email }}">{{ user.email }}</span>
+{% if is_admin %}
+<a href="/admin/users">User management</a>
+{% endif %}
+<a href="/docs">API docs</a>
+<a href="/auth/logout">Sign out</a>
+{% endblock %}
+{% block content %}
+<div class="terra-card terra-card-wide">
+  <div class="terra-card-accent" aria-hidden="true"></div>
+  <div class="terra-card-inner">
+    <p class="terra-lead">
+      Welcome back. Open <a href="/devices"><strong>Devices</strong></a> in the sidebar for the synced SD-WAN inventory
+      (compare, sync, and drill-down). Inventory timestamps are stored in <strong>UTC</strong>; tables and detail views
+      labeled “your time” use your browser time zone.
+    </p>
+    <ul class="terra-detail-list">
+      <li><strong>Email</strong> {{ user.email }}</li>
+      <li><strong>Display name</strong> {{ user.display_name }}</li>
+      <li><strong>Roles</strong> {{ user.roles | join(", ") }}</li>
+      <li><strong>Verified</strong> {{ "yes" if user.email_verified_at else "no" }}</li>
+    </ul>
+
+    <h2 class="terra-section-title">Device locations</h2>
+    {% if map_has_markers %}
+    <p class="terra-home-map-note">
+      Only devices whose Manager inventory JSON includes latitude/longitude (or geoLocation) are shown.
+      <strong>Green</strong> markers are online (reachable); <strong>red</strong> are offline.
+    </p>
+    <script type="application/json" id="terra-home-map-markers">{{ map_markers_json | safe }}</script>
+    <div class="terra-home-map-wrap">
+      <div id="terra-home-map" class="terra-home-map" role="application" aria-label="Device locations map"></div>
+    </div>
+    {% else %}
+    <p class="terra-muted">
+      No geographic coordinates found for any synced device. When the Manager API exposes latitude/longitude (for
+      example under geoLocation or siteLatitude/siteLongitude), positions appear here after the next sync.
+    </p>
+    {% endif %}
+  </div>
+</div>
+{% endblock %}
+{% block extra_scripts %}
+{% if map_has_markers %}
+<script src="https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.js" crossorigin=""></script>
+<script src="/static/js/terra-home-map.js"></script>
+{% endif %}
+{% endblock %}

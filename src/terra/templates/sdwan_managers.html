@@ -1,0 +1,155 @@
+{% extends "base.html" %}
+{% block header_nav %}
+<span class="terra-header-user" title="{{ user.email }}">{{ user.email }}</span>
+{% if is_admin %}
+<a href="/admin/users">User management</a>
+{% endif %}
+<a href="/docs">API docs</a>
+<a href="/auth/logout">Sign out</a>
+{% endblock %}
+{% block content %}
+<div class="terra-card terra-card-wide">
+  <div class="terra-card-accent" aria-hidden="true"></div>
+  <div class="terra-card-inner">
+    <h1 class="terra-page-title">Cisco Catalyst SD-WAN Manager</h1>
+    <p class="terra-lead">
+      Register one or more remote <strong>SD-WAN Manager (vManage)</strong> instances. Prefer
+      <strong>JWT</strong> API tokens (Admin → My Profile → API token) for REST access; use
+      <strong>username and password</strong> only when JWT is unavailable — TERRA establishes a session via
+      <code class="terra-code">j_security_check</code> and validates against
+      <code class="terra-code">/dataservice/client/server</code>.
+    </p>
+
+    {% if request.query_params.get('added') %}
+    <div class="terra-alert terra-alert-info" role="status">
+      Manager profile saved.
+      {% if request.query_params.get('probe') == 'warn' %}
+      Connection check reported a problem — review status below and use <strong>Verify</strong>.
+      {% endif %}
+    </div>
+    {% endif %}
+    {% if request.query_params.get('deleted') %}
+    <div class="terra-alert terra-alert-info" role="status">Manager profile removed.</div>
+    {% endif %}
+    {% if request.query_params.get('verified') == 'ok' %}
+    <div class="terra-alert terra-alert-info" role="status">Connection verified successfully.</div>
+    {% elif request.query_params.get('verified') == 'fail' %}
+    <div class="terra-alert terra-alert-error" role="alert">Verification failed — see the instance row for details.</div>
+    {% endif %}
+    {% if form_error %}
+    <div class="terra-alert terra-alert-error" role="alert">{{ form_error }}</div>
+    {% endif %}
+
+    <h2 class="terra-section-title">Registered managers</h2>
+    {% if instances %}
+    <div class="terra-table-wrap">
+      <table class="terra-table">
+        <thead>
+          <tr>
+            <th scope="col">Name</th>
+            <th scope="col">URL</th>
+            <th scope="col">Auth</th>
+            <th scope="col">TLS verify</th>
+            <th scope="col">Status</th>
+            <th scope="col">Token / session expiry</th>
+            <th scope="col">Manager version</th>
+            <th scope="col">Last check</th>
+            <th scope="col">Details</th>
+            <th scope="col">Actions</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for row in instances %}
+          <tr>
+            <td><strong>{{ row.display_name }}</strong></td>
+            <td class="terra-table-mono">{{ row.base_url }}</td>
+            <td>{{ "JWT" if row.auth_mode == "jwt" else "Session" }}</td>
+            <td>{{ "yes" if row.verify_tls else "no" }}</td>
+            <td>
+              <span class="terra-status terra-status--{{ row.link_status }}">{{ row.link_status }}</span>
+              {% if row.last_http_status is not none %}
+              <span class="terra-sub">HTTP {{ row.last_http_status }}</span>
+              {% endif %}
+            </td>
+            <td>
+              {% if row.token_expires_at %}
+              {{ row.token_expires_at.strftime("%Y-%m-%d %H:%M UTC") }}
+              {% else %}
+              <span class="terra-muted">—</span>
+              {% endif %}
+            </td>
+            <td>{{ row.manager_version or "—" }}</td>
+            <td>
+              {% if row.last_verified_at %}
+              {{ row.last_verified_at.strftime("%Y-%m-%d %H:%M UTC") }}
+              {% else %}
+              —
+              {% endif %}
+            </td>
+            <td class="terra-table-clip" title="{{ row.last_error or '' }}">{{ row.last_error or "—" }}</td>
+            <td class="terra-actions-narrow">
+              <form class="terra-inline-form" method="post" action="/administration/sd-wan/{{ row.id }}/verify">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
+                <button class="terra-btn-small" type="submit">Verify</button>
+              </form>
+              <form class="terra-inline-form" method="post" action="/administration/sd-wan/{{ row.id }}/delete" onsubmit="return confirm('Remove this manager profile?');">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
+                <button class="terra-btn-danger" type="submit">Remove</button>
+              </form>
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% else %}
+    <p class="terra-sub">No managers yet — add one using the form below.</p>
+    {% endif %}
+
+    <h2 class="terra-section-title">Add manager instance</h2>
+    <form class="terra-admin-form" method="post" action="/administration/sd-wan/add" autocomplete="off">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
+      <div class="terra-field-row">
+        <div class="terra-field terra-field-inline">
+          <label for="display_name">Local name</label>
+          <input id="display_name" name="display_name" type="text" required maxlength="120" placeholder="e.g. Production EMEA" />
+        </div>
+        <div class="terra-field terra-field-inline">
+          <label for="base_url">Manager base URL</label>
+          <input id="base_url" name="base_url" type="url" required placeholder="https://vmanager.example.com" />
+        </div>
+      </div>
+      <fieldset class="terra-role-fieldset">
+        <legend class="terra-legend">Authentication (JWT preferred)</legend>
+        <label class="terra-check">
+          <input type="radio" name="auth_mode" value="jwt" checked />
+          JWT (API token from SD-WAN Manager)
+        </label>
+        <label class="terra-check">
+          <input type="radio" name="auth_mode" value="session" />
+          Session (username and password)
+        </label>
+      </fieldset>
+      <div class="terra-field">
+        <label for="jwt_token">JWT bearer token</label>
+        <textarea id="jwt_token" name="jwt_token" rows="3" class="terra-textarea" placeholder="Paste JWT when using JWT mode"></textarea>
+      </div>
+      <div class="terra-field-row">
+        <div class="terra-field terra-field-inline">
+          <label for="sdwan_username">SD-WAN username</label>
+          <input id="sdwan_username" name="sdwan_username" type="text" autocomplete="off" />
+        </div>
+        <div class="terra-field terra-field-inline">
+          <label for="sdwan_password">SD-WAN password</label>
+          <input id="sdwan_password" name="sdwan_password" type="password" autocomplete="new-password" />
+        </div>
+      </div>
+      <label class="terra-check" style="margin-top: 0.75rem">
+        <input type="checkbox" name="verify_tls" value="on" checked />
+        Verify TLS certificates (uncheck only for lab appliances with private CAs)
+      </label>
+      <button class="terra-btn terra-btn-secondary" type="submit">Save and test connection</button>
+    </form>
+  </div>
+</div>
+{% endblock %}

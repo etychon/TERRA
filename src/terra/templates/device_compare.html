@@ -1,0 +1,43 @@
+{% extends "base.html" %}
+{% block extra_head %}
+<link rel="stylesheet" href="/static/css/terra-devices.css" />
+{% endblock %}
+{% block header_nav %}
+<span class="terra-header-user" title="{{ user.email }}">{{ user.email }}</span>
+{% if is_admin %}
+<a href="/admin/users">User management</a>
+{% endif %}
+<a href="/devices">Devices</a>
+<a href="/docs">API docs</a>
+<a href="/auth/logout">Sign out</a>
+{% endblock %}
+{% block content %}
+<div class="terra-card terra-card-wide">
+  <div class="terra-card-accent" aria-hidden="true"></div>
+  <div class="terra-card-inner">
+    <p class="terra-lead"><a href="/devices">← Devices</a> · <a href="/">Home</a></p>
+    <h1 class="terra-page-title">Compare devices</h1>
+    <p class="terra-sub">
+      All flattened fields from each device’s Manager JSON (same order as your <code class="terra-code">ids=</code> query).
+      Highlighted cells differ from the <strong>first</strong> device in that list for that row.
+    </p>
+    <div
+      class="terra-compare-grid terra-compare-grid--pretty"
+      style="grid-template-columns: minmax(14rem, 20rem) repeat({{ devices|length }}, minmax(11rem, 1fr));"
+    >
+      <div class="terra-compare-cell terra-compare-head">Field</div>
+      {% for d in devices %}
+      <div class="terra-compare-cell terra-compare-head">{{ d.hostname or d.serial_number or ('ID ' ~ d.id) }}</div>
+      {% endfor %}
+      {% for row in compare_rows %}
+      <div class="terra-compare-cell terra-compare-cell--key" title="{{ row.key }}">{{ row.key_label }}</div>
+      {% for cell in row.cells %}
+      <div class="terra-compare-cell terra-compare-value{% if cell.diff %} terra-compare-cell--diff{% endif %}">
+        <pre class="terra-compare-pre">{{ cell.value }}</pre>
+      </div>
+      {% endfor %}
+      {% endfor %}
+    </div>
+  </div>
+</div>
+{% endblock %}
