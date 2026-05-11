@@ -1,0 +1,3 @@
+# Cursor agents
+
+Follow `AGENTS.md` (agent workflows, PR + specs rules, CI). For full product and integration context, read `LLM_CONTEXT.md` and the short files under `specs/`. For dashboard UI, follow `specs/design-system.md` and `.cursor/skills/terra-ui-design-system/SKILL.md`.

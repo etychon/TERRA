@@ -1,0 +1,16 @@
+repos:
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.8.4
+    hooks:
+      - id: ruff
+        args: [--fix]
+      - id: ruff-format
+
+  - repo: local
+    hooks:
+      - id: terra-frontend-lint
+        name: terra frontend lint (ESLint + design contract)
+        entry: bash -c 'command -v npm >/dev/null 2>&1 || { echo "npm is required to run the frontend design lint hook" >&2; exit 1; }; [ -d node_modules ] || npm install; npm run lint'
+        language: system
+        files: ^(frontend/|package\.json|package-lock\.json)
+        pass_filenames: false

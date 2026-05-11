@@ -1,0 +1,102 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/**
+ * Theme colors are HSL triplets (hue saturation lightness) without `hsl()`.
+ * Tailwind maps with hsl(var(--token) / <alpha-value>).
+ * Switch themes by toggling `class="dark"` on the root element — no JS color math.
+ */
+
+@layer base {
+  :root {
+    color-scheme: light;
+    --radius: 0.625rem;
+    --background: 210 40% 98%;
+    --foreground: 215 35% 12%;
+    --card: 210 38% 96%;
+    --card-foreground: 215 35% 12%;
+    --popover: 210 40% 99%;
+    --popover-foreground: 215 35% 12%;
+    --primary: 192 100% 42%;
+    --primary-foreground: 210 40% 98%;
+    --secondary: 210 22% 92%;
+    --secondary-foreground: 215 30% 18%;
+    --muted: 210 18% 90%;
+    --muted-foreground: 215 12% 38%;
+    --accent: 192 90% 36%;
+    --accent-foreground: 210 40% 98%;
+    --destructive: 4 72% 51%;
+    --destructive-foreground: 210 40% 98%;
+    --border: 210 18% 86%;
+    --input: 210 18% 86%;
+    --ring: 192 100% 42%;
+    --brand-wave-a: 192 100% 42%;
+    --brand-wave-b: 198 100% 36%;
+  }
+
+  .dark {
+    color-scheme: dark;
+    --radius: 0.625rem;
+    --background: 215 45% 7%;
+    --foreground: 210 30% 92%;
+    --card: 215 42% 10%;
+    --card-foreground: 210 30% 92%;
+    --popover: 215 45% 8%;
+    --popover-foreground: 210 30% 92%;
+    --primary: 192 100% 46%;
+    --primary-foreground: 215 45% 8%;
+    --secondary: 215 32% 14%;
+    --secondary-foreground: 210 28% 90%;
+    --muted: 215 28% 14%;
+    --muted-foreground: 210 12% 72%;
+    --accent: 192 90% 40%;
+    --accent-foreground: 215 45% 8%;
+    --destructive: 4 68% 48%;
+    --destructive-foreground: 210 40% 98%;
+    --border: 215 28% 18%;
+    --input: 215 28% 18%;
+    --ring: 192 100% 46%;
+    --brand-wave-a: 192 100% 48%;
+    --brand-wave-b: 200 90% 38%;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    *,
+    *::before,
+    *::after {
+      animation-duration: 0.01ms !important;
+      animation-iteration-count: 1 !important;
+      transition-duration: 0.01ms !important;
+      scroll-behavior: auto !important;
+    }
+  }
+}
+
+@layer components {
+  .terra-ambient-surface {
+    position: relative;
+    isolation: isolate;
+    background-color: hsl(var(--card) / 1);
+    background-image: linear-gradient(
+      125deg,
+      hsl(var(--brand-wave-a) / 0.22) 0%,
+      hsl(var(--brand-wave-b) / 0.12) 45%,
+      hsl(var(--brand-wave-a) / 0.18) 100%
+    );
+    background-size: 220% 220%;
+    animation: terra-gradient-drift 22s ease-in-out infinite;
+  }
+
+  @keyframes terra-gradient-drift {
+    0% {
+      background-position: 0% 50%;
+    }
+    50% {
+      background-position: 100% 40%;
+    }
+    100% {
+      background-position: 0% 50%;
+    }
+  }
+}

@@ -1,0 +1,13 @@
+{
+  "name": "terra",
+  "private": true,
+  "description": "TERRA — monorepo root (Python backend + frontend). UI tooling lives under frontend/.",
+  "workspaces": ["frontend"],
+  "engines": {
+    "node": ">=18"
+  },
+  "scripts": {
+    "lint": "npm run lint -w terra-dashboard-frontend",
+    "typecheck": "npm run typecheck -w terra-dashboard-frontend"
+  }
+}
