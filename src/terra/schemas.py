@@ -83,6 +83,55 @@ class SyncDevicesStats(BaseModel):
     managers: int
     rows_touched: int
     errors: int
+    #: When ``managers == 1``, UTC ISO time for that manager's ``devices_last_sync_at_utc`` after sync.
+    last_sync_at_utc: str | None = None
+    #: When ``errors > 0`` on single-manager sync, Manager-facing reason (HTTP message, inventory phase, etc.).
+    error_detail: str | None = None
+
+
+class SyncJobQueued(BaseModel):
+    """Async SD-WAN inventory job was queued (poll ``SyncJobStatus``)."""
+
+    job_id: str
+
+
+class SyncJobStatus(BaseModel):
+    """Progress / outcome for ``POST …/sync-sdwan-devices/{id}/async``."""
+
+    job_id: str
+    #: ``queued``, ``running``, ``done``, ``failed``, or ``cancelled``
+    status: str
+    phase: str
+    percent: int
+    message: str
+    rows_touched: int | None = None
+    errors: int | None = None
+    error_detail: str | None = None
+    last_sync_at_utc: str | None = None
+
+
+class SyncJobCancelResponse(BaseModel):
+    """Result of ``POST …/sync-sdwan-jobs/{job_id}/cancel``."""
+
+    accepted: bool
+    message: str = ""
+
+
+class AppLogItem(BaseModel):
+    """One in-memory application log row (admin Logs UI)."""
+
+    seq: int
+    ts: str
+    level: str
+    component: str
+    message: str
+    detail: str = ""
+    http_status: int | None = None
+
+
+class AppLogFeedResponse(BaseModel):
+    entries: list[AppLogItem]
+    tail_seq: int
 
 
 class MapDeviceTelemetryItem(BaseModel):
@@ -105,6 +154,16 @@ class LiveSdWanInterfaceRow(BaseModel):
     ip: str
     vrf: str
     detail: str
+    ip_cidr: str = ""
+    admin_status: str = ""
+    admin_tone: str = ""
+    oper_status: str = ""
+    oper_tone: str = ""
+    speed: str = ""
+    vpn_id: str = ""
+    service_vpn: str = ""
+    is_tunnel: str = ""
+    row_defer: str = ""
 
 
 class LiveSdWanCellularTable(BaseModel):

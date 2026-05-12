@@ -72,6 +72,7 @@ _VERSION_KEYS: tuple[str, ...] = (
     "version",
     "serverVersion",
     "softwareVersion",
+    "platformVersion",
     "mnemonic",
     "vmanageVersion",
     "vmanagedVersion",
@@ -127,6 +128,10 @@ def _manager_version_from_server_json(body: Any) -> str | None:
                     candidates.append(el)
             if not data:
                 candidates.append(body)
+        elif isinstance(data, dict):
+            # Multitenant / newer builds: ``data`` is a single object (version fields live here, not on the root).
+            candidates.append(data)
+            candidates.append(body)
         else:
             candidates.append(body)
         for nest_key in ("server", "vmanage", "about", "info", "organization"):
@@ -158,11 +163,16 @@ def _manager_version_from_server_json(body: Any) -> str | None:
     return None
 
 
-def read_manager_version(client: httpx.Client, base_url: str) -> str | None:
+def read_manager_version(
+    client: httpx.Client, base_url: str, *, request_timeout: float | None = None
+) -> str | None:
     """GET /dataservice/client/server using an already-authenticated client; return Manager version if present."""
     base = base_url.rstrip("/")
+    req_kw: dict[str, Any] = {"headers": {"Accept": "application/json"}}
+    if request_timeout is not None:
+        req_kw["timeout"] = request_timeout
     try:
-        r = client.get(f"{base}/dataservice/client/server", headers={"Accept": "application/json"})
+        r = client.get(f"{base}/dataservice/client/server", **req_kw)
     except httpx.RequestError:
         return None
     if r.status_code >= 400:

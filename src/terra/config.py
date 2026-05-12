@@ -50,6 +50,26 @@ class Settings(BaseSettings):
         le=45.0,
         description="HTTP timeout (seconds) for each per-device enrich GET during sync.",
     )
+    sdwan_sync_inventory_timeout_seconds: float = Field(
+        default=120.0,
+        ge=10.0,
+        le=600.0,
+        description=(
+            "HTTP timeout (seconds) for inventory-phase dataservice calls during sync "
+            "(tenant list, device list, tenant switch, manager version). "
+            "Separate from the long-lived httpx client default used for rare bulk operations."
+        ),
+    )
+    sdwan_batch_max_concurrent_managers: int = Field(
+        default=3,
+        ge=1,
+        le=16,
+        description=(
+            "Max concurrent Manager inventory syncs in the periodic background batch and "
+            "in POST /api/v1/me/sync-sdwan-devices. Each worker uses its own DB session. "
+            "Lower on SQLite if you see database is locked."
+        ),
+    )
     device_live_poll_interval_seconds: int = Field(
         default=5,
         ge=3,

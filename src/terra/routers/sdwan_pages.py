@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Annotated, Any
@@ -14,9 +15,16 @@ from sqlalchemy.orm import Session
 
 from terra.config import get_settings
 from terra.crud import user_to_public
-from terra.crud_sdwan import delete_sdwan_manager, get_sdwan_manager, list_sdwan_managers
+from terra.crud_sdwan import (
+    count_synced_devices_for_manager,
+    delete_sdwan_manager,
+    edge_inventory_labels_for_manager,
+    get_sdwan_manager,
+    list_sdwan_managers,
+)
 from terra.db import get_db
 from terra.deps import ensure_csrf, get_current_user, require_csrf, user_is_admin
+from terra.inventory_extract import utc_iso_for_json
 from terra.models import SdWanAuthMode, SdWanLinkStatus, SdWanManagerInstance, User
 from terra.sdwan_client import (
     ProbeResult,
@@ -26,7 +34,11 @@ from terra.sdwan_client import (
     probe_jwt,
     probe_session,
 )
+from terra.sdwan_credential_scope import credential_scope_public_label, detect_credential_scope
+from terra.sdwan_http import open_manager_http_client
 from terra.secret_store import decrypt_json, encrypt_json
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/administration", tags=["administration"])
 templates = Jinja2Templates(directory=str(Path(__file__).resolve().parent.parent / "templates"))
@@ -48,6 +60,8 @@ def _apply_probe(inst: SdWanManagerInstance, result: ProbeResult, *, auth_mode: 
         else:
             inst.token_expires_at = None
     else:
+        inst.credential_scope = None
+        inst.credential_scope_detail = None
         inst.manager_version = None
         if auth_mode == SdWanAuthMode.jwt.value:
             inst.token_expires_at = jwt_expires_at(
@@ -61,6 +75,20 @@ def _apply_probe(inst: SdWanManagerInstance, result: ProbeResult, *, auth_mode: 
             inst.link_status = SdWanLinkStatus.unreachable.value
 
 
+def _detect_and_store_credential_scope(secret_key: str, inst: SdWanManagerInstance) -> None:
+    """Best-effort multitenant vs single-tenant classification (does not change link_status)."""
+    try:
+        with open_manager_http_client(secret_key, inst) as client:
+            det = detect_credential_scope(client, inst.base_url)
+        inst.credential_scope = det.code
+        d = det.detail.strip()
+        inst.credential_scope_detail = d[:512] if d else None
+    except Exception as exc:
+        logger.warning("SD-WAN credential scope detection failed for instance %s: %s", inst.id, exc)
+        inst.credential_scope = "unknown"
+        inst.credential_scope_detail = str(exc)[:512]
+
+
 def _jwt_from_encrypted(secret_key: str, blob: str) -> str | None:
     try:
         data = decrypt_json(secret_key, blob)
@@ -72,9 +100,11 @@ def _jwt_from_encrypted(secret_key: str, blob: str) -> str | None:
     return t or None
 
 
-def _rows_for_template(rows: list[SdWanManagerInstance]) -> list[dict[str, Any]]:
+def _rows_for_template(db: Session, rows: list[SdWanManagerInstance]) -> list[dict[str, Any]]:
     out: list[dict[str, Any]] = []
     for m in rows:
+        edge_total, edge_labels = edge_inventory_labels_for_manager(db, m.id)
+        synced_total = count_synced_devices_for_manager(db, m.id)
         out.append(
             {
                 "id": m.id,
@@ -88,6 +118,14 @@ def _rows_for_template(rows: list[SdWanManagerInstance]) -> list[dict[str, Any]]
                 "last_http_status": m.last_http_status,
                 "last_error": m.last_error,
                 "last_verified_at": m.last_verified_at,
+                "devices_last_sync_at_utc_iso": (
+                    utc_iso_for_json(m.devices_last_sync_at_utc) if m.devices_last_sync_at_utc else None
+                ),
+                "edge_device_count": edge_total,
+                "synced_device_total": synced_total,
+                "edge_device_labels": edge_labels,
+                "credential_scope_label": credential_scope_public_label(m.credential_scope),
+                "credential_scope_detail": m.credential_scope_detail or "",
             }
         )
     return out
@@ -111,7 +149,7 @@ def sdwan_administration_page(
             "nav_is_admin": user_is_admin(user),
             "nav_active": "sdwan",
             "csrf_token": ensure_csrf(request),
-            "instances": _rows_for_template(rows),
+            "instances": _rows_for_template(db, rows),
             "form_error": None,
         },
     )
@@ -197,6 +235,8 @@ def sdwan_add_instance(
         result = probe_session(norm_url, sdwan_username.strip(), sdwan_password, verify_tls=verify_tls_on)
 
     _apply_probe(inst, result, auth_mode=mode, secret_key=settings.secret_key)
+    if result.ok:
+        _detect_and_store_credential_scope(settings.secret_key, inst)
     db.add(inst)
     db.commit()
 
@@ -221,7 +261,7 @@ def _form_error_response(request: Request, db: Session, user: User, message: str
             "nav_is_admin": user_is_admin(user),
             "nav_active": "sdwan",
             "csrf_token": ensure_csrf(request),
-            "instances": _rows_for_template(rows),
+            "instances": _rows_for_template(db, rows),
             "form_error": message,
         },
         status_code=status.HTTP_400_BAD_REQUEST,
@@ -249,6 +289,8 @@ def sdwan_verify_instance(
         verify_tls=inst.verify_tls,
     )
     _apply_probe(inst, result, auth_mode=inst.auth_mode, secret_key=settings.secret_key)
+    if result.ok:
+        _detect_and_store_credential_scope(settings.secret_key, inst)
     db.add(inst)
     db.commit()
     q = "verified=ok" if result.ok else "verified=fail"

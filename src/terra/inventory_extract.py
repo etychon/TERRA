@@ -135,6 +135,305 @@ def _pick(d: dict[str, Any], *keys: str) -> str:
     return ""
 
 
+def _pick_first_meaningful_ip(d: dict[str, Any], *keys: str) -> str:
+    """Like ``_pick`` for address fields, but treats ``-`` / ``n/a`` / empty as absent (Cisco interface API)."""
+    absent = frozenset(
+        {
+            "",
+            "-",
+            "—",
+            "n/a",
+            "na",
+            "none",
+            "null",
+            "::",
+        },
+    )
+    for k in keys:
+        if k not in d:
+            continue
+        s = _scalar_to_str(d.get(k))
+        if not s or s.strip().lower() in absent:
+            continue
+        return s
+    return ""
+
+
+def _ipv4_to_int(addr: str) -> int | None:
+    parts = addr.strip().split(".")
+    if len(parts) != 4:
+        return None
+    try:
+        octets = [int(p) for p in parts]
+    except ValueError:
+        return None
+    if any(o < 0 or o > 255 for o in octets):
+        return None
+    return (octets[0] << 24) | (octets[1] << 16) | (octets[2] << 8) | octets[3]
+
+
+def _prefix_bits_from_mask_int(mask_int: int) -> int | None:
+    """CIDR prefix length for a contiguous IPv4 netmask, or None if invalid."""
+    if mask_int < 0 or mask_int > 0xFFFFFFFF:
+        return None
+    if mask_int == 0:
+        return 0
+    inv = (~mask_int) & 0xFFFFFFFF
+    if inv == 0:
+        return 32
+    inc = inv + 1
+    if inc & (inc - 1) != 0:
+        return None
+    return 32 - (inc.bit_length() - 1)
+
+
+def _prefix_from_dotted_mask(mask: str) -> int | None:
+    m = _ipv4_to_int(mask)
+    if m is None:
+        return None
+    return _prefix_bits_from_mask_int(m)
+
+
+def _iface_status_label_tone(raw: str) -> tuple[str, str]:
+    """Human label + chip tone (success | error | warning | neutral) for admin/oper status."""
+    s = raw.strip().lower()
+    if not s:
+        return "Unknown", "neutral"
+    if s in {"up", "1", "if-up", "true", "yes", "ready"}:
+        return "Up", "success"
+    if s in {"down", "2", "if-down", "false", "no"}:
+        return "Down", "error"
+    if "down" in s and "admin" in s:
+        return "Admin down", "error"
+    if "down" in s:
+        return "Down", "error"
+    if "up" in s and "down" not in s:
+        return "Up", "success"
+    if s in {"3", "testing"}:
+        return "Testing", "warning"
+    if s in {"4", "unknown"} or "unknown" in s:
+        return "Unknown", "neutral"
+    if s in {"5", "dormant"}:
+        return "Dormant", "warning"
+    if "lower" in s or "partial" in s or "degraded" in s:
+        return raw.strip()[:48] or "Degraded", "warning"
+    return raw.strip()[:48] or "Unknown", "neutral"
+
+
+def _canon_line_state_token(raw: str) -> str:
+    """Collapse hyphens/underscores/spacing for comparing noisy Manager / YANG echo values."""
+    s = raw.strip().lower()
+    for ch in ("\u2011", "\u2010", "\u2212", "\u00ad"):
+        s = s.replace(ch, "-")
+    return re.sub(r"[^a-z0-9]", "", s)
+
+
+# Values sometimes copied into ``if-oper-status`` (or only present as the ready leaf echo).
+_OPER_LINE_STATE_ECHO_CANON: frozenset[str] = frozenset(
+    {
+        "ifoperstateready",
+        "operstateready",
+    }
+)
+
+
+def _oper_value_is_placeholder_leaf(oper_primary: str) -> bool:
+    """True when the string is a YANG leaf echo / placeholder, not a real SNMP-style oper state."""
+    c = _canon_line_state_token(oper_primary)
+    if not c:
+        return False
+    if c in _OPER_LINE_STATE_ECHO_CANON:
+        return True
+    # e.g. ``if-oper-state-ready-yang`` or vendor suffixes — still the ready leaf, not ``up``/``down``.
+    return c.startswith("ifoperstateready") or c.startswith("operstateready")
+
+
+def _line_oper_label_tone(oper_raw: str) -> tuple[str, str]:
+    """Line state column: never show raw YANG leaf names; treat known echoes as **Up**."""
+    if _oper_value_is_placeholder_leaf(oper_raw):
+        return "Up", "success"
+    return _iface_status_label_tone(oper_raw)
+
+
+def _if_oper_state_ready_implies_up(ready_raw: str) -> bool:
+    """``if-oper-state-ready`` (and similar) often means the line protocol is ready / up."""
+    s = ready_raw.strip().lower()
+    if not s:
+        return False
+    if s in {"true", "1", "yes", "up", "ready", "if-ready", "if-up"}:
+        return True
+    if "not-ready" in s or "not_ready" in s or s in {"false", "0", "no", "down"}:
+        return False
+    return "ready" in s
+
+
+def _oper_primary_ambiguous_or_unknown(oper_primary: str) -> bool:
+    """True when ``if-oper-status`` is absent or does not give a clear line state on its own."""
+    if not oper_primary.strip():
+        return True
+    if _oper_value_is_placeholder_leaf(oper_primary):
+        return True
+    o_label, o_tone = _iface_status_label_tone(oper_primary)
+    if o_label == "Unknown":
+        return True
+    s = oper_primary.strip().lower()
+    return o_tone == "neutral" and (
+        s in {"0", "unknown", "n/a", "-", "--"} or (s.isdigit() and s not in {"1", "2"})
+    )
+
+
+def _effective_oper_raw_for_line_state(d: dict[str, Any]) -> tuple[str, str, str]:
+    """
+    Return ``(raw_for_tone, oper_primary, ready_raw)`` for line state.
+
+    Prefer ``if-oper-status``. When it is absent or ambiguous/unknown, treat a true
+    ``if-oper-state-ready`` as operational ``up``. Does not override an explicit oper Down.
+    """
+    oper_primary = _pick(
+        d,
+        "if-oper-status",
+        "ifOperStatus",
+        "if_oper_status",
+        "oper-state",
+        "operState",
+        "operation-state",
+        "line-protocol",
+    )
+    ready_raw = _pick(
+        d,
+        "if-oper-state-ready",
+        "ifOperStateReady",
+        "if_oper_state_ready",
+        "oper-state-ready",
+        "operStateReady",
+    )
+    if oper_primary.strip():
+        o_label, o_tone = _iface_status_label_tone(oper_primary)
+        if o_tone == "error" and o_label == "Down":
+            return oper_primary, oper_primary, ready_raw
+        if _if_oper_state_ready_implies_up(ready_raw) and _oper_primary_ambiguous_or_unknown(oper_primary):
+            return "up", oper_primary, ready_raw
+        if _oper_value_is_placeholder_leaf(oper_primary):
+            return "up", oper_primary, ready_raw
+        return oper_primary, oper_primary, ready_raw
+    if _if_oper_state_ready_implies_up(ready_raw):
+        return "up", oper_primary, ready_raw
+    if ready_raw.strip():
+        return ready_raw, oper_primary, ready_raw
+    return "", oper_primary, ready_raw
+
+
+def _parse_positive_int_str(s: str) -> int | None:
+    try:
+        n = int(float(s))
+    except (TypeError, ValueError):
+        return None
+    if n < 0:
+        return None
+    return n
+
+
+def _resolve_ip_cidr(ip_val: str, d: dict[str, Any]) -> str:
+    """Format ``address/prefix`` when prefix or netmask is available; else plain IP or em dash."""
+    ip = ip_val.strip()
+    if not ip or ip == "—":
+        return "—"
+    if ip in {"0.0.0.0", "::"}:
+        return "—"
+    pl = _pick(
+        d,
+        "ipv4-prefix-length",
+        "ipv4PrefixLength",
+        "prefix-length",
+        "prefixLength",
+        "cidr-prefix",
+        "cidrPrefix",
+        "ip-prefix-length",
+        "ipPrefixLength",
+    )
+    if pl and pl.isdigit():
+        p = int(pl)
+        if 0 <= p <= 32:
+            return f"{ip}/{p}"
+    mask = _pick(
+        d,
+        "ipv4-subnet-mask",
+        "ipv4SubnetMask",
+        "subnet-mask",
+        "subnetMask",
+        "netmask",
+        "mask",
+    )
+    if mask:
+        bits = _prefix_from_dotted_mask(mask)
+        if bits is not None:
+            return f"{ip}/{bits}"
+    return ip
+
+
+def _speed_human_from_dict(d: dict[str, Any]) -> str:
+    raw = _pick(
+        d,
+        "negotiated-port-speed",
+        "negotiatedPortSpeed",
+        "port-speed",
+        "portSpeed",
+        "speed",
+        "lan-speed",
+        "lanSpeed",
+        "link-speed",
+        "linkSpeed",
+    )
+    if not raw:
+        return ""
+    s = raw.strip()
+    low = s.lower()
+    if any(u in low for u in ("bps", "gbps", "mbps", "kbps", "auto", "n/a", "none")):
+        return s[:64]
+    try:
+        n = float(s)
+    except ValueError:
+        return s[:64]
+    if n <= 0:
+        return ""
+    if n >= 1_000_000:
+        g = n / 1_000_000_000
+        if g >= 1:
+            return f"{g:g} Gbps"
+        m = n / 1_000_000
+        return f"{m:g} Mbps"
+    if n >= 1000:
+        return f"{n / 1000:g} Gbps"
+    return f"{n:g} Mbps"
+
+
+def _vpn_id_from_dict(d: dict[str, Any], vrf_fallback: str) -> int:
+    vid = _pick(d, "vpn-id", "vpnId", "vpnID")
+    if not vid and vrf_fallback.isdigit():
+        vid = vrf_fallback
+    if not vid:
+        return -1
+    n = _parse_positive_int_str(vid)
+    return n if n is not None else -1
+
+
+def _is_tunnel_row(name: str, d: dict[str, Any]) -> bool:
+    it = _pick(d, "interface-type", "interfaceType", "intf-type", "intfType", "if-type", "ifType").lower()
+    if it and any(x in it for x in ("tunnel", "ipsec", "gre", "vti", "sslvpn")):
+        return True
+    nl = name.strip().lower()
+    if nl.startswith(("tunnel", "ipsec", "gre", "vti", "sslvpn", "dvti")):
+        return True
+    return "tunnel" in nl or "ipsec" in nl
+
+
+def _has_assigned_ipv4(ip_plain: str, ip_cidr: str) -> bool:
+    ip = ip_plain.strip()
+    if not ip or ip == "—" or ip in {"0.0.0.0", "::"}:
+        return False
+    return not (ip_cidr == "—" or not ip_cidr.strip())
+
+
 _IFACE_LIST_KEYS = (
     "deviceInterface",
     "interfaces",
@@ -197,7 +496,7 @@ def _row_from_interface_dict(d: dict[str, Any]) -> dict[str, str]:
         "nic",
         "INTF",
     )
-    ip_val = _pick(
+    ip_val = _pick_first_meaningful_ip(
         d,
         "ip-address",
         "ipAddress",
@@ -217,6 +516,16 @@ def _row_from_interface_dict(d: dict[str, Any]) -> dict[str, str]:
         "privateIp",
         "public-ip",
         "publicIp",
+        "secondary-address",
+        "secondaryAddress",
+        "pdp-ipv4-address",
+        "pdpIpv4Address",
+        "pdn-ipv4-address",
+        "pdnIpv4Address",
+        "assigned-ip",
+        "assignedIp",
+        "modem-ip",
+        "modemIp",
     )
     vrf = _pick(
         d,
@@ -228,15 +537,67 @@ def _row_from_interface_dict(d: dict[str, Any]) -> dict[str, str]:
         "vpn-name",
         "vpnName",
     )
-    admin = _pick(d, "admin-state", "adminState", "if-admin-status", "admin-v26")
-    oper = _pick(d, "oper-state", "operState", "operation-state", "line-protocol")
+    admin_raw = _pick(
+        d,
+        "if-admin-status",
+        "ifAdminStatus",
+        "admin-state",
+        "adminState",
+        "admin-v26",
+    )
+    oper_raw, oper_primary, oper_ready = _effective_oper_raw_for_line_state(d)
+    admin_label, admin_tone = _iface_status_label_tone(admin_raw)
+    oper_label, oper_tone = _line_oper_label_tone(oper_raw)
     mtu = _pick(d, "mtu", "if-mtu")
-    out = {"interface": name or "—", "ip": ip_val or "—", "vrf": vrf or "—"}
-    detail_parts = []
-    if admin:
-        detail_parts.append(f"admin {admin}")
-    if oper:
-        detail_parts.append(f"oper {oper}")
+
+    ip_plain = ip_val or "—"
+    ip_cidr = _resolve_ip_cidr(ip_val, d) if ip_val else "—"
+    if not ip_val:
+        ip_cidr = "—"
+
+    speed_human = _speed_human_from_dict(d)
+    vid = _vpn_id_from_dict(d, "")
+    if vid < 0:
+        alt = _pick(d, "vrfName", "vrf-name", "vrf")
+        if alt.isdigit():
+            vid = int(alt)
+    vpn_id_str = str(vid) if vid >= 0 else ""
+    if vid == 0:
+        service_vpn = "WAN"
+    elif vid > 0:
+        service_vpn = "LAN"
+    else:
+        service_vpn = "—"
+
+    if_name = name or "—"
+    is_tunnel = "1" if _is_tunnel_row(if_name, d) else "0"
+
+    has_ip = _has_assigned_ipv4(ip_val, ip_cidr)
+    admin_down = bool(admin_raw.strip()) and admin_tone == "error" and admin_label in {"Down", "Admin down"}
+    row_defer = "1" if (admin_down or not has_ip) else "0"
+
+    out: dict[str, str] = {
+        "interface": if_name,
+        "ip": ip_plain,
+        "ip_cidr": ip_cidr,
+        "vrf": vrf or "—",
+        "admin_status": admin_label,
+        "admin_tone": admin_tone,
+        "oper_status": oper_label,
+        "oper_tone": oper_tone,
+        "speed": speed_human,
+        "vpn_id": vpn_id_str,
+        "service_vpn": service_vpn,
+        "is_tunnel": is_tunnel,
+        "row_defer": row_defer,
+    }
+    detail_parts: list[str] = []
+    if admin_raw and admin_raw != admin_label:
+        detail_parts.append(f"admin {admin_raw}")
+    if oper_raw and oper_raw.lower() != oper_label.lower():
+        detail_parts.append(f"oper {oper_raw}")
+    elif oper_ready.strip() and oper_raw == "up" and _oper_primary_ambiguous_or_unknown(oper_primary):
+        detail_parts.append(f"if-oper-state-ready {oper_ready}")
     if mtu:
         detail_parts.append(f"MTU {mtu}")
     out["detail"] = ", ".join(detail_parts) if detail_parts else ""
@@ -313,6 +674,33 @@ def extract_interface_rows(parsed: dict[str, Any]) -> list[dict[str, str]]:
     _walk_nested_for_interfaces(parsed, 0, add_row)
 
     return rows[:500]
+
+
+def interface_row_sort_key(r: dict[str, str]) -> tuple[int, int, int, str]:
+    """Sort: physical interfaces before tunnels; WAN (vpn 0) before LAN; then vpn id; then name."""
+    tun = 1 if r.get("is_tunnel") == "1" else 0
+    try:
+        vid = int(r.get("vpn_id", "-1"))
+    except ValueError:
+        vid = -1
+    wan_bucket = 0 if vid == 0 else 1
+    sort_vid = vid if vid >= 0 else 999_999
+    return (tun, wan_bucket, sort_vid, (r.get("interface") or "").lower())
+
+
+def prepare_interface_detail_tables(
+    rows: list[dict[str, str]],
+) -> tuple[list[dict[str, str]], list[dict[str, str]]]:
+    """Split rows into primary vs collapsed (admin-down or no IPv4), preserving WAN-first / tunnel-last order."""
+    ordered = sorted(rows, key=interface_row_sort_key)
+    primary: list[dict[str, str]] = []
+    deferred: list[dict[str, str]] = []
+    for r in ordered:
+        if r.get("row_defer") == "1":
+            deferred.append(r)
+        else:
+            primary.append(r)
+    return primary, deferred
 
 
 _CELL_HINT = re.compile(

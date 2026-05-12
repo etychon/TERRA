@@ -1,4 +1,7 @@
 {% extends "base.html" %}
+{% block extra_head %}
+<link rel="stylesheet" href="/static/css/terra-sdwan-admin.css" />
+{% endblock %}
 {% block header_nav %}
 <span class="terra-header-user" title="{{ user.email }}">{{ user.email }}</span>
 {% if is_admin %}
@@ -18,6 +21,8 @@
       <strong>username and password</strong> only when JWT is unavailable — TERRA establishes a session via
       <code class="terra-code">j_security_check</code> and validates against
       <code class="terra-code">/dataservice/client/server</code>.
+      Use <strong>Sync now</strong> on a row to pull inventory for that cluster only; the Devices page can sync
+      <strong>all</strong> connected clusters at once.
     </p>
 
     {% if request.query_params.get('added') %}
@@ -49,10 +54,15 @@
             <th scope="col">Name</th>
             <th scope="col">URL</th>
             <th scope="col">Auth</th>
+            <th scope="col" title="Multitenant vs single-tenant Manager API behavior for these credentials (updated on Verify)">
+              Credential scope
+            </th>
             <th scope="col">TLS verify</th>
             <th scope="col">Status</th>
             <th scope="col">Token / session expiry</th>
             <th scope="col">Manager version</th>
+            <th scope="col">Edge devices (synced)</th>
+            <th scope="col">Last inventory sync</th>
             <th scope="col">Last check</th>
             <th scope="col">Details</th>
             <th scope="col">Actions</th>
@@ -60,10 +70,11 @@
         </thead>
         <tbody>
           {% for row in instances %}
-          <tr>
+          <tr data-terra-manager-row="{{ row.id }}">
             <td><strong>{{ row.display_name }}</strong></td>
             <td class="terra-table-mono">{{ row.base_url }}</td>
             <td>{{ "JWT" if row.auth_mode == "jwt" else "Session" }}</td>
+            <td class="terra-table-clip" title="{{ row.credential_scope_detail }}">{{ row.credential_scope_label }}</td>
             <td>{{ "yes" if row.verify_tls else "no" }}</td>
             <td>
               <span class="terra-status terra-status--{{ row.link_status }}">{{ row.link_status }}</span>
@@ -79,6 +90,45 @@
               {% endif %}
             </td>
             <td>{{ row.manager_version or "—" }}</td>
+            <td class="terra-sdwan-edge-wrap">
+              {% if row.synced_device_total %}
+              <p class="terra-sdwan-edge-muted">
+                <strong>{{ row.synced_device_total }}</strong> device row{% if row.synced_device_total != 1 %}s{% endif %} in TERRA
+                {% if row.synced_device_total != row.edge_device_count %}
+                <span class="terra-muted"> · {{ row.edge_device_count }} WAN edge(s) listed (controllers hidden)</span>
+                {% endif %}
+              </p>
+              {% endif %}
+              {% if row.edge_device_count %}
+              <details class="terra-sdwan-edge-details">
+                <summary class="terra-sdwan-edge-summary">
+                  <strong>{{ row.edge_device_count }}</strong> edge{% if row.edge_device_count != 1 %}s{% endif %}
+                  {% if row.edge_device_count > (row.edge_device_labels | length) %}
+                  <span class="terra-muted">(showing first {{ row.edge_device_labels | length }})</span>
+                  {% endif %}
+                </summary>
+                <ol class="terra-sdwan-edge-list">
+                  {% for label in row.edge_device_labels %}
+                  <li>{{ label }}</li>
+                  {% endfor %}
+                </ol>
+              </details>
+              {% elif row.synced_device_total %}
+              <span class="terra-muted">No WAN edges in this inventory</span>
+              <p class="terra-sdwan-edge-muted">Rows exist for this cluster — open <strong>Devices</strong> (clear table header filters if the grid looks empty).</p>
+              {% else %}
+              <span class="terra-muted">None yet</span>
+              <p class="terra-sdwan-edge-muted">Run <strong>Sync now</strong> to discover WAN edges (controllers are hidden).</p>
+              {% endif %}
+            </td>
+            <td>
+              <span
+                class="terra-relative-sync"
+                data-terra-relative-sync
+                data-utc="{{ row.devices_last_sync_at_utc_iso or '' }}"
+                title="{{ row.devices_last_sync_at_utc_iso or 'Never synced' }}"
+                >—</span>
+            </td>
             <td>
               {% if row.last_verified_at %}
               {{ row.last_verified_at.strftime("%Y-%m-%d %H:%M UTC") }}
@@ -92,10 +142,37 @@
                 <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
                 <button class="terra-btn-small" type="submit">Verify</button>
               </form>
+              <button
+                type="button"
+                class="terra-btn-small terra-sdwan-sync-one"
+                data-instance-id="{{ row.id }}"
+                data-instance-name="{{ row.display_name }}"
+              >
+                Sync now
+              </button>
               <form class="terra-inline-form" method="post" action="/administration/sd-wan/{{ row.id }}/delete" onsubmit="return confirm('Remove this manager profile?');">
                 <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
                 <button class="terra-btn-danger" type="submit">Remove</button>
               </form>
+            </td>
+          </tr>
+          <tr class="terra-sdwan-sync-inline-row" data-terra-sync-row-for="{{ row.id }}" hidden>
+            <td colspan="13" class="terra-sdwan-sync-inline-cell">
+              <div class="terra-sdwan-sync-inline-panel" role="status" aria-live="polite">
+                <div class="terra-sdwan-sync-inline-head">
+                  <strong class="terra-sdwan-sync-inline-title">Sync inventory</strong>
+                  <span class="terra-muted terra-sdwan-sync-inline-for"></span>
+                </div>
+                <div class="terra-sdwan-sync-track" aria-hidden="true">
+                  <div class="terra-sdwan-sync-fill" style="width: 0%"></div>
+                </div>
+                <p class="terra-sdwan-sync-status">Starting…</p>
+                <p class="terra-sdwan-sync-sub"></p>
+                <div class="terra-sdwan-sync-inline-actions">
+                  <button type="button" class="terra-btn-small terra-sdwan-sync-cancel" disabled>Cancel</button>
+                  <button type="button" class="terra-btn-small terra-sdwan-sync-close" disabled>Close</button>
+                </div>
+              </div>
             </td>
           </tr>
           {% endfor %}
@@ -152,4 +229,7 @@
     </form>
   </div>
 </div>
+{% endblock %}
+{% block extra_scripts %}
+<script src="/static/js/terra-sdwan-admin.js"></script>
 {% endblock %}

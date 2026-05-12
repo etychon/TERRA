@@ -4,7 +4,7 @@
 
 1. `README.md` — human + agent orientation, commands, layout.
 2. `LLM_CONTEXT.md` — codename, scope, integrations, UI stack, and non-goals in machine-oriented form (**includes enforced Docker Compose bootstrap**).
-3. `specs/` — **short** canonical decisions. If behavior or architecture changes, update specs in the **same PR**. (Runtime defaults such as **Docker Compose** and cross-platform targets are summarized in `specs/architecture.md` and detailed for agents in `LLM_CONTEXT.md`.)
+3. `specs/` — **short** canonical decisions. If behavior or architecture changes, update specs in the **same PR**. (Runtime defaults such as **Docker Compose** and cross-platform targets are summarized in `specs/architecture.md` and detailed for agents in `LLM_CONTEXT.md`.) For **Cisco Catalyst SD-WAN Manager** HTTP/dataservice usage, see **`specs/sdwan-manager-api.md`** (endpoint map + code pointers); multitenant and interface nuance stay in **`specs/integrations.md`**.
 4. **UI work:** read `specs/design-system.md` and use the Cursor skill `.cursor/skills/terra-ui-design-system/SKILL.md` (Material 3 structure + Cisco tokens + Tailwind/shadcn CSS-variable pattern + Jinja static CSS + guardrails).
 
 ## Public-ready commit (Cursor)

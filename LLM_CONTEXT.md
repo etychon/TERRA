@@ -113,7 +113,7 @@ Use **multi-arch base images** and/or explicit `platform` policies only where ne
 
 ## Repository mechanical map
 
-- **`specs/`:** keep short; update with behavioral PRs. **`specs/design-system.md`** owns UI SSOT rules.
+- **`specs/`:** keep short; update with behavioral PRs. **`specs/design-system.md`** owns UI SSOT rules. **`specs/sdwan-manager-api.md`** maps which **Cisco Catalyst SD-WAN Manager** dataservice paths TERRA uses (auth, inventory, live reads); deeper multitenant/interface narrative lives in **`specs/integrations.md`**.
 - **`frontend/`:** dashboard UI, Tailwind + shadcn-oriented setup, **tokens** (`src/tokens/`), **globals.css**, ESLint design guardrails.
 - **`.cursor/skills/terra-ui-design-system/`:** Cursor **SKILL** for agents implementing UI (loads detailed guardrails + file paths).
 - **`src/terra/`:** FastAPI backend (auth, RBAC, APIs); **must** remain reachable via the Compose `api` service and `/health`.

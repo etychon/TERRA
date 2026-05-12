@@ -36,6 +36,8 @@
 
     <h2 class="terra-section-title">Inventory (TERRA)</h2>
     <dl class="terra-dl-pretty">
+      <div class="terra-dl-pretty__row"><dt>SD-WAN cluster</dt><dd>{{ cluster_display }}</dd></div>
+      <div class="terra-dl-pretty__row"><dt>Tenant</dt><dd>{{ tenant_display }}</dd></div>
       <div class="terra-dl-pretty__row"><dt>Serial</dt><dd>{{ serial_display or "—" }}</dd></div>
       <div class="terra-dl-pretty__row"><dt>Model</dt><dd>{{ device.model or "—" }}</dd></div>
       <div class="terra-dl-pretty__row"><dt>Software</dt><dd>{{ device.software_version or "—" }}</dd></div>
@@ -58,27 +60,80 @@
       when enabled). Use <strong>Sync now</strong> on Devices to refresh. For on-demand Manager reads, use
       <strong>Show live data</strong> above (polls in the browser; does not block this page load).
     </p>
-    {% if interface_rows %}
+    {% if interface_rows_primary or interface_rows_deferred %}
     <div class="terra-table-wrap terra-detail-if-table">
-      <table class="terra-table">
+      <table class="terra-table terra-if-summary-table">
         <thead>
           <tr>
             <th>Interface</th>
-            <th>IP</th>
-            <th>VRF</th>
+            <th>Administrative status</th>
+            <th>Line state</th>
+            <th>IPv4 (CIDR)</th>
+            <th>Speed</th>
+            <th>Service VPN</th>
+            <th>VRF / VPN</th>
             <th>Notes</th>
           </tr>
         </thead>
         <tbody>
-          {% for ir in interface_rows %}
+          {% for ir in interface_rows_primary %}
           <tr>
-            <td>{{ ir.interface }}</td>
-            <td>{{ ir.ip }}</td>
+            <td class="terra-table-mono">{{ ir.interface }}</td>
+            <td>
+              {% if ir.admin_tone == "success" %}<span class="terra-m3-chip terra-m3-chip--pill terra-m3-chip--success">{{ ir.admin_status }}</span>
+              {% elif ir.admin_tone == "error" %}<span class="terra-m3-chip terra-m3-chip--pill terra-m3-chip--error">{{ ir.admin_status }}</span>
+              {% elif ir.admin_tone == "warning" %}<span class="terra-m3-chip terra-m3-chip--pill terra-m3-chip--warning">{{ ir.admin_status }}</span>
+              {% else %}<span class="terra-m3-chip terra-m3-chip--pill terra-m3-chip--neutral">{{ ir.admin_status }}</span>{% endif %}
+            </td>
+            <td>
+              {% if ir.oper_tone == "success" %}<span class="terra-m3-chip terra-m3-chip--pill terra-m3-chip--success">{{ ir.oper_status }}</span>
+              {% elif ir.oper_tone == "error" %}<span class="terra-m3-chip terra-m3-chip--pill terra-m3-chip--error">{{ ir.oper_status }}</span>
+              {% elif ir.oper_tone == "warning" %}<span class="terra-m3-chip terra-m3-chip--pill terra-m3-chip--warning">{{ ir.oper_status }}</span>
+              {% else %}<span class="terra-m3-chip terra-m3-chip--pill terra-m3-chip--neutral">{{ ir.oper_status }}</span>{% endif %}
+            </td>
+            <td class="terra-table-mono">{% if ir.ip_cidr %}{{ ir.ip_cidr }}{% else %}—{% endif %}</td>
+            <td>{% if ir.speed %}{{ ir.speed }}{% else %}—{% endif %}</td>
+            <td>{{ ir.service_vpn }}</td>
             <td>{{ ir.vrf }}</td>
-            <td>{{ ir.detail }}</td>
+            <td class="terra-table-clip" title="{{ ir.detail }}">{{ ir.detail or "—" }}</td>
+          </tr>
+          {% endfor %}
+          {% if interface_rows_deferred %}
+          <tr class="terra-if-more-row">
+            <td colspan="8">
+              <button type="button" class="terra-btn terra-btn--inline terra-btn--text terra-if-more-btn" aria-expanded="false">
+                More…
+              </button>
+            </td>
+          </tr>
+          {% endif %}
+        </tbody>
+        {% if interface_rows_deferred %}
+        <tbody class="terra-if-deferred-tbody" hidden>
+          {% for ir in interface_rows_deferred %}
+          <tr class="terra-if-row--deferred">
+            <td class="terra-table-mono">{{ ir.interface }}</td>
+            <td>
+              {% if ir.admin_tone == "success" %}<span class="terra-m3-chip terra-m3-chip--pill terra-m3-chip--success">{{ ir.admin_status }}</span>
+              {% elif ir.admin_tone == "error" %}<span class="terra-m3-chip terra-m3-chip--pill terra-m3-chip--error">{{ ir.admin_status }}</span>
+              {% elif ir.admin_tone == "warning" %}<span class="terra-m3-chip terra-m3-chip--pill terra-m3-chip--warning">{{ ir.admin_status }}</span>
+              {% else %}<span class="terra-m3-chip terra-m3-chip--pill terra-m3-chip--neutral">{{ ir.admin_status }}</span>{% endif %}
+            </td>
+            <td>
+              {% if ir.oper_tone == "success" %}<span class="terra-m3-chip terra-m3-chip--pill terra-m3-chip--success">{{ ir.oper_status }}</span>
+              {% elif ir.oper_tone == "error" %}<span class="terra-m3-chip terra-m3-chip--pill terra-m3-chip--error">{{ ir.oper_status }}</span>
+              {% elif ir.oper_tone == "warning" %}<span class="terra-m3-chip terra-m3-chip--pill terra-m3-chip--warning">{{ ir.oper_status }}</span>
+              {% else %}<span class="terra-m3-chip terra-m3-chip--pill terra-m3-chip--neutral">{{ ir.oper_status }}</span>{% endif %}
+            </td>
+            <td class="terra-table-mono">{% if ir.ip_cidr %}{{ ir.ip_cidr }}{% else %}—{% endif %}</td>
+            <td>{% if ir.speed %}{{ ir.speed }}{% else %}—{% endif %}</td>
+            <td>{{ ir.service_vpn }}</td>
+            <td>{{ ir.vrf }}</td>
+            <td class="terra-table-clip" title="{{ ir.detail }}">{{ ir.detail or "—" }}</td>
           </tr>
           {% endfor %}
         </tbody>
+        {% endif %}
       </table>
     </div>
     {% else %}

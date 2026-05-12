@@ -26,9 +26,10 @@ from terra.inventory_extract import (
     display_serial,
     extract_cellular_kv,
     extract_interface_rows,
+    prepare_interface_detail_tables,
     utc_iso_for_json,
 )
-from terra.models import User
+from terra.models import SdWanManagerInstance, User
 
 router = APIRouter(prefix="/devices", tags=["devices"])
 templates = Jinja2Templates(directory=str(Path(__file__).resolve().parent.parent / "templates"))
@@ -225,6 +226,13 @@ def device_detail(
     row = get_device_for_user(db, user.id, device_id)
     if row is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Device not found")
+    inst = db.get(SdWanManagerInstance, row.sdwan_instance_id)
+    cluster_display = inst.display_name if inst else "—"
+    tenant_display = "—"
+    if (row.sdwan_tenant_name or "").strip():
+        tenant_display = row.sdwan_tenant_name.strip()
+    elif (row.sdwan_tenant_id or "").strip():
+        tenant_display = row.sdwan_tenant_id.strip()
     try:
         parsed: dict[str, Any] = json.loads(row.raw_json)
         if not isinstance(parsed, dict):
@@ -237,6 +245,7 @@ def device_detail(
     # Interfaces and cellular hints come from last synced inventory only (background sync),
     # not blocking Manager dataservice calls on page load.
     interface_rows = extract_interface_rows(parsed)
+    interface_rows_primary, interface_rows_deferred = prepare_interface_detail_tables(interface_rows)
     settings = get_settings()
 
     return templates.TemplateResponse(
@@ -251,10 +260,13 @@ def device_detail(
             "nav_active": "devices",
             "csrf_token": ensure_csrf(request),
             "device": row,
+            "cluster_display": cluster_display,
+            "tenant_display": tenant_display,
             "serial_display": serial_display,
             "state_changed_iso": utc_iso_for_json(row.state_changed_at_utc),
             "synced_iso": utc_iso_for_json(row.synced_at_utc),
-            "interface_rows": interface_rows,
+            "interface_rows_primary": interface_rows_primary,
+            "interface_rows_deferred": interface_rows_deferred,
             "cellular_kv": cellular_kv,
             "manager_field_groups": manager_field_groups,
             "pretty_json": json.dumps(parsed, indent=2, sort_keys=True, default=str)[:120000],

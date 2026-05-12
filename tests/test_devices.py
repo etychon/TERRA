@@ -7,6 +7,7 @@ from collections.abc import Iterator
 from contextlib import contextmanager
 from typing import Any
 
+import httpx
 import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import select
@@ -76,6 +77,8 @@ def test_devices_inventory_page(client: TestClient) -> None:
     r = client.get("/devices")
     assert r.status_code == 200
     assert "terra-devices-json" in r.text
+    assert "terra-devices-columns-btn" in r.text
+    assert "terra-devices-control-plane-btn" in r.text
     assert "Devices across SD-WAN managers" in r.text
     assert "terra-sidebar-link" in r.text and "Devices" in r.text
 
@@ -85,27 +88,32 @@ def test_sync_api_returns_stats(client: TestClient, monkeypatch: pytest.MonkeyPa
 
     @contextmanager
     def fake_open(secret_key: str, inst: SdWanManagerInstance) -> Iterator[Any]:
-        class Resp:
-            status_code = 200
-
-            def json(self) -> dict[str, Any]:
-                return {
-                    "data": [
-                        {
-                            "uuid": "inv-test-1",
-                            "host-name": "edge-test-1",
-                            "serialNumber": "SN-TEST-1",
-                            "deviceModel": "ISR1100-4G",
-                            "softwareVersion": "17.9.4a",
-                            "deviceType": "vedge",
-                            "reachability": "reachable",
-                        },
-                    ],
-                }
-
         class C:
-            def get(self, *_a: Any, **_k: Any) -> Resp:
-                return Resp()
+            def get(self, url: str, *_a: Any, **_k: Any) -> httpx.Response:
+                u = str(url)
+                if "/dataservice/tenant" in u and "switch" not in u:
+                    return httpx.Response(404)
+                if "/dataservice/client/server" in u:
+                    return httpx.Response(200, json={"data": [{"vmanageVersion": "20.10.0"}]})
+                return httpx.Response(
+                    200,
+                    json={
+                        "data": [
+                            {
+                                "uuid": "inv-test-1",
+                                "host-name": "edge-test-1",
+                                "serialNumber": "SN-TEST-1",
+                                "deviceModel": "ISR1100-4G",
+                                "softwareVersion": "17.9.4a",
+                                "deviceType": "vedge",
+                                "reachability": "reachable",
+                            },
+                        ],
+                    },
+                )
+
+            def post(self, *_a: Any, **_k: Any) -> httpx.Response:
+                return httpx.Response(404)
 
         yield C()
 
@@ -142,6 +150,7 @@ def test_sync_api_returns_stats(client: TestClient, monkeypatch: pytest.MonkeyPa
             select(SyncedDevice).where(
                 SyncedDevice.sdwan_instance_id == manager_id,
                 SyncedDevice.source_device_uuid == "inv-test-1",
+                SyncedDevice.sdwan_tenant_id == "",
             )
         ).scalar_one_or_none()
         assert n is not None

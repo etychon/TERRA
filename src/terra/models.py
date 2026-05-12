@@ -90,6 +90,8 @@ class SdWanManagerInstance(Base):
     last_error: Mapped[str | None] = mapped_column(String(1024))
     last_verified_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     devices_last_sync_at_utc: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    credential_scope: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    credential_scope_detail: Mapped[str | None] = mapped_column(String(512), nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )
@@ -109,7 +111,12 @@ class SyncedDevice(Base):
 
     __tablename__ = "synced_devices"
     __table_args__ = (
-        UniqueConstraint("sdwan_instance_id", "source_device_uuid", name="uq_synced_device_per_manager"),
+        UniqueConstraint(
+            "sdwan_instance_id",
+            "source_device_uuid",
+            "sdwan_tenant_id",
+            name="uq_synced_device_per_manager_tenant",
+        ),
     )
 
     id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
@@ -118,6 +125,10 @@ class SyncedDevice(Base):
         nullable=False,
     )
     source_device_uuid: Mapped[str] = mapped_column(String(160), nullable=False)
+    #: Multitenant Manager: tenant id used in ``POST …/tenant/{id}/switch``; empty for single-tenant / legacy rows.
+    sdwan_tenant_id: Mapped[str] = mapped_column(String(160), nullable=False, default="")
+    #: Human-readable tenant label from Manager (may be empty when only an id exists).
+    sdwan_tenant_name: Mapped[str] = mapped_column(String(255), nullable=False, default="")
     hostname: Mapped[str] = mapped_column(String(255), nullable=False, default="")
     serial_number: Mapped[str] = mapped_column(String(128), nullable=False, default="")
     model: Mapped[str] = mapped_column(String(128), nullable=False, default="")

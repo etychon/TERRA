@@ -44,6 +44,15 @@ def get_engine() -> Engine:
     return _engine
 
 
+def sdwan_batch_needs_serial_execution() -> bool:
+    """When True, SD-WAN manager sync batch must not use concurrent workers on one DB connection.
+
+    In-memory SQLite uses :class:`~sqlalchemy.pool.StaticPool` (single shared connection).
+    Concurrent threads issuing ORM operations can race and return empty rows (e.g. ``Session.get``).
+    """
+    return _sqlite_is_memory(get_settings().database_url)
+
+
 def get_session_factory() -> sessionmaker[Session]:
     global SessionLocal
     if SessionLocal is None:
@@ -77,12 +86,87 @@ def _sqlite_add_missing_columns(engine: Engine) -> None:
                 text("ALTER TABLE sdwan_manager_instances ADD COLUMN devices_last_sync_at_utc TIMESTAMP")
             )
             logger.info("Applied SQLite patch: sdwan_manager_instances.devices_last_sync_at_utc")
+        if "credential_scope" not in names:
+            conn.execute(text("ALTER TABLE sdwan_manager_instances ADD COLUMN credential_scope VARCHAR(32)"))
+            logger.info("Applied SQLite patch: sdwan_manager_instances.credential_scope")
+        if "credential_scope_detail" not in names:
+            conn.execute(
+                text("ALTER TABLE sdwan_manager_instances ADD COLUMN credential_scope_detail VARCHAR(512)")
+            )
+            logger.info("Applied SQLite patch: sdwan_manager_instances.credential_scope_detail")
+
+
+def _sqlite_migrate_synced_devices_multitenant(engine: Engine) -> None:
+    """
+    Add sdwan_tenant_id / sdwan_tenant_name and replace the 2-col unique index with a 3-col one.
+    SQLite cannot ALTER constraints in place; rebuild the table when the new columns are missing.
+    """
+    if not str(engine.url).startswith("sqlite"):
+        return
+    with engine.begin() as conn:
+        exists = conn.execute(
+            text("SELECT 1 FROM sqlite_master WHERE type='table' AND name='synced_devices'")
+        ).scalar()
+        if exists is None:
+            return
+        cols = {row[1] for row in conn.execute(text("PRAGMA table_info(synced_devices)")).fetchall()}
+        if "sdwan_tenant_id" in cols and "sdwan_tenant_name" in cols:
+            return
+        conn.execute(text("PRAGMA foreign_keys=OFF"))
+        conn.execute(
+            text(
+                """
+                CREATE TABLE synced_devices__new (
+                    id INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
+                    sdwan_instance_id INTEGER NOT NULL,
+                    source_device_uuid VARCHAR(160) NOT NULL,
+                    sdwan_tenant_id VARCHAR(160) NOT NULL DEFAULT '',
+                    sdwan_tenant_name VARCHAR(255) NOT NULL DEFAULT '',
+                    hostname VARCHAR(255) NOT NULL,
+                    serial_number VARCHAR(128) NOT NULL,
+                    model VARCHAR(128) NOT NULL,
+                    software_version VARCHAR(128) NOT NULL,
+                    device_type VARCHAR(64) NOT NULL,
+                    site_id VARCHAR(64),
+                    reachability VARCHAR(32) NOT NULL,
+                    state_changed_at_utc TIMESTAMP NOT NULL,
+                    synced_at_utc TIMESTAMP NOT NULL,
+                    raw_json TEXT NOT NULL,
+                    FOREIGN KEY(sdwan_instance_id) REFERENCES sdwan_manager_instances (id) ON DELETE CASCADE,
+                    UNIQUE (sdwan_instance_id, source_device_uuid, sdwan_tenant_id)
+                )
+                """
+            )
+        )
+        conn.execute(
+            text(
+                """
+                INSERT INTO synced_devices__new (
+                    id, sdwan_instance_id, source_device_uuid, sdwan_tenant_id, sdwan_tenant_name,
+                    hostname, serial_number, model, software_version, device_type, site_id,
+                    reachability, state_changed_at_utc, synced_at_utc, raw_json
+                )
+                SELECT
+                    id, sdwan_instance_id, source_device_uuid, '', '',
+                    hostname, serial_number, model, software_version, device_type, site_id,
+                    reachability, state_changed_at_utc, synced_at_utc, raw_json
+                FROM synced_devices
+                """
+            )
+        )
+        conn.execute(text("DROP TABLE synced_devices"))
+        conn.execute(text("ALTER TABLE synced_devices__new RENAME TO synced_devices"))
+        conn.execute(text("PRAGMA foreign_keys=ON"))
+        logger.info(
+            "Applied SQLite migration: synced_devices tenant columns + uq_synced_device_per_manager_tenant"
+        )
 
 
 def init_db() -> None:
     eng = get_engine()
     Base.metadata.create_all(bind=eng)
     _sqlite_add_missing_columns(eng)
+    _sqlite_migrate_synced_devices_multitenant(eng)
     seed_rbac()
 
 

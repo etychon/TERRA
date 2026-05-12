@@ -1,0 +1,47 @@
+{% extends "base.html" %}
+{% block extra_head %}
+<link rel="stylesheet" href="/static/css/terra-logs.css" />
+{% endblock %}
+{% block header_nav %}
+<span class="terra-header-user" title="{{ user.email }}">{{ user.email }}</span>
+<a href="/admin/users">User management</a>
+<a href="/docs">API docs</a>
+<a href="/auth/logout">Sign out</a>
+{% endblock %}
+{% block content %}
+<div class="terra-card terra-card-wide terra-logs-card">
+  <div class="terra-card-accent" aria-hidden="true"></div>
+  <div class="terra-card-inner">
+    <h1 class="terra-page-title">Application logs</h1>
+    <p class="terra-lead">
+      Live, in-memory log stream for operators (timestamps use your browser timezone).
+      <strong>Newest entries appear at the top.</strong> Polling pauses noisy endpoints; SD-WAN sync uses a separate job
+      API. Search supports <code class="terra-code">*</code> and <code class="terra-code">?</code> wildcards (matches
+      component, message, and detail).
+    </p>
+    <div class="terra-logs-toolbar">
+      <label class="terra-logs-search">
+        <span class="terra-logs-search-label">Search</span>
+        <input
+          id="terra-logs-q"
+          type="search"
+          class="terra-input terra-logs-search-input"
+          placeholder="e.g. *sdwan* or http*403*"
+          autocomplete="off"
+        />
+      </label>
+      <button type="button" class="terra-btn terra-btn--inline" id="terra-logs-search-btn">Search</button>
+      <button type="button" class="terra-btn terra-btn--inline terra-btn--outlined" id="terra-logs-clear-btn">
+        Clear search
+      </button>
+      <button type="button" class="terra-btn terra-btn--inline terra-btn--outlined" id="terra-logs-scroll-toggle" aria-pressed="true">
+        Pause scroll
+      </button>
+    </div>
+    <div id="terra-logs-stream" class="terra-logs-stream" role="log" aria-live="polite" aria-relevant="additions"></div>
+  </div>
+</div>
+{% endblock %}
+{% block extra_scripts %}
+<script src="/static/js/terra-logs.js"></script>
+{% endblock %}

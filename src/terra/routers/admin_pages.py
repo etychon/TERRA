@@ -61,6 +61,26 @@ def admin_users_page(
     )
 
 
+@router.get("/logs", response_class=HTMLResponse)
+def admin_logs_page(
+    request: Request,
+    admin: Annotated[User, Depends(require_admin)],
+) -> HTMLResponse:
+    """In-memory application log viewer (admin)."""
+    return templates.TemplateResponse(
+        request,
+        "admin_logs.html",
+        {
+            "title": "Logs — TERRA",
+            "user": user_to_public(admin),
+            "show_app_shell": True,
+            "nav_is_admin": True,
+            "nav_active": "logs",
+            "csrf_token": ensure_csrf(request),
+        },
+    )
+
+
 @router.post("/users/create", response_model=None)
 def admin_create_user_submit(
     request: Request,

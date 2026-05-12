@@ -19,6 +19,10 @@
 - **GPS history:** sample every few minutes where device/API allows; retain roughly **one day** of rolling history for operational map playback (exact retention in implementation spec later).
 - **Events / alerts:** must be explainable in plain language for non-experts.
 
+## Device inventory (UI)
+
+The **Devices** home grid uses Tabulator with **browser localStorage** persistence for column **order**, **width**, **visibility**, and **sort**. Operators add or remove fields via the **Columns** control. **Tenant** defaults visible next to **Manager** so multi-tenant Manager inventory is readable at a glance (rows without tenant scope show "—"). **Control-plane** nodes (vManage, vSmart, vBond, etc.) are **hidden by default** in the grid; a toolbar toggle shows them and remembers the choice per browser.
+
 ## Non-domain (explicit)
 
 - Full SD-WAN **control-plane configuration** education is not a goal.

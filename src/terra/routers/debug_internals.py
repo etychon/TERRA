@@ -76,6 +76,8 @@ def debug_summary(
             "sdwan_background_sync": s.sdwan_background_sync,
             "sdwan_sync_interval_seconds": s.sdwan_sync_interval_seconds,
             "sdwan_sync_startup_delay_seconds": s.sdwan_sync_startup_delay_seconds,
+            "sdwan_sync_inventory_timeout_seconds": s.sdwan_sync_inventory_timeout_seconds,
+            "sdwan_batch_max_concurrent_managers": s.sdwan_batch_max_concurrent_managers,
             "admin_email": s.admin_email,
         },
         "runtime": {
@@ -141,6 +143,8 @@ def debug_devices_sample(
             {
                 "id": d.id,
                 "manager": mgr_name,
+                "sdwan_tenant_id": d.sdwan_tenant_id,
+                "sdwan_tenant_name": d.sdwan_tenant_name,
                 "source_device_uuid": d.source_device_uuid,
                 "hostname": d.hostname,
                 "serial_number": d.serial_number,

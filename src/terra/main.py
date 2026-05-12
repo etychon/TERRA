@@ -5,18 +5,29 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import logging
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Awaitable, Callable
 from contextlib import asynccontextmanager
 from pathlib import Path
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.staticfiles import StaticFiles
 from starlette.middleware.sessions import SessionMiddleware
+from starlette.responses import Response
 
 from terra.config import Settings, get_settings
 from terra.crud import purge_expired_tokens
 from terra.db import get_session_factory, init_db
-from terra.routers import admin_pages, api_auth, api_me, api_users, auth_pages, device_pages, home, sdwan_pages
+from terra.routers import (
+    admin_pages,
+    api_admin_logs,
+    api_auth,
+    api_me,
+    api_users,
+    auth_pages,
+    device_pages,
+    home,
+    sdwan_pages,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -47,6 +58,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     @asynccontextmanager
     async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
+        from terra.app_log_buffer import configure_ring_buffer, install_ring_buffer_logging
+
+        configure_ring_buffer(3000)
+        install_ring_buffer_logging()
         init_db()
         sf = get_session_factory()
         with sf() as db:
@@ -59,6 +74,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             task.cancel()
             with contextlib.suppress(asyncio.CancelledError):
                 await task
+        from terra.sdwan_sync_job_runner import shutdown_executor
+
+        shutdown_executor()
 
     app = FastAPI(
         title="TERRA API",
@@ -88,7 +106,46 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(auth_pages.router)
     app.include_router(api_auth.router)
     app.include_router(api_me.router)
+    app.include_router(api_admin_logs.router)
     app.include_router(api_users.router)
+
+    @app.middleware("http")
+    async def terra_http_access_log(
+        request: Request,
+        call_next: Callable[[Request], Awaitable[Response]],
+    ) -> Response:
+        response = await call_next(request)
+        try:
+            p = request.url.path
+            if p.startswith("/static") or p.startswith("/docs") or p.startswith("/openapi.json") or p == "/health":
+                return response
+            if not p.startswith(("/api/", "/admin", "/devices", "/administration", "/auth")):
+                return response
+            if request.method == "GET" and any(
+                frag in p for frag in ("/sync-sdwan-jobs/", "/api/v1/admin/logs", "/map-devices-telemetry")
+            ):
+                return response
+            from terra.app_log_buffer import log_http_request
+            from terra.db import get_session_factory
+            from terra.sdwan_operator_log import http_access_log_detail_for_path
+
+            detail = ""
+            if (
+                "/sync-sdwan-devices/" in p
+                or "/live-sdwan" in p
+                or p.rstrip("/").endswith("/sync-sdwan-devices")
+            ):
+                try:
+                    sf = get_session_factory()
+                    with sf() as db:
+                        detail = http_access_log_detail_for_path(db, p)
+                except Exception:
+                    detail = ""
+
+            log_http_request(method=request.method, path=p, status_code=response.status_code, detail=detail)
+        except Exception:
+            logger.debug("TERRA access log middleware skipped", exc_info=True)
+        return response
 
     from terra.routers.debug_internals import attach_debug_routes
 

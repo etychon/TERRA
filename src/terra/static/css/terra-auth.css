@@ -961,6 +961,11 @@ body.terra-site-body {
   white-space: nowrap;
 }
 
+.terra-m3-chip--pill {
+  border-radius: var(--md-sys-shape-corner-full);
+  padding: 0.1875rem 0.75rem;
+}
+
 .terra-m3-chip--success,
 .terra-status--connected {
   background: hsl(152 42% 22% / 0.85);

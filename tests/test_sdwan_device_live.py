@@ -29,6 +29,9 @@ def test_interface_row_from_live_api_dict_maps_ifname() -> None:
     )
     assert row["interface"] == "GigabitEthernet1"
     assert row["ip"] == "192.168.1.1"
+    assert row["vpn_id"] == "0"
+    assert row["service_vpn"] == "WAN"
+    assert row["admin_status"] == "Up"
     assert "rx-kbps" in row["detail"]
 
 

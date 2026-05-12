@@ -13,6 +13,9 @@
     return;
   }
   const showOwner = mount.getAttribute("data-show-owner") === "true";
+  const LS_SHOW_CONTROL = showOwner
+    ? "terra-devices-show-sdwan-control-v1-owner"
+    : "terra-devices-show-sdwan-control-v1";
   /* Long-press for bulk; CLICK_MS must be > LONG_MS so a slow tap (hold then release before bulk) still navigates. */
   const LONG_MS = 750;
   const CLICK_MS = 950;
@@ -28,6 +31,7 @@
   }
 
   let bulkMode = false;
+  let columnPickerWired = false;
   /** @type {Set<number>} */
   const selectedIds = new Set();
   /** @type {number[]} preserve selection order for compare */
@@ -109,6 +113,75 @@
     }
     const label = escapeHtml(raw);
     return `<span class="terra-m3-chip terra-m3-chip--${tone}" role="status">${label}</span>`;
+  }
+
+  /** Match ``crud_sdwan._is_controller_inventory_row`` (vManage / vSmart / vBond, etc.). */
+  function isControlPlaneRow(row) {
+    const rawType = String(row.device_type || "").trim();
+    const dt = rawType.toLowerCase();
+    if (!dt) {
+      return false;
+    }
+    if (
+      dt === "vmanage" ||
+      dt === "vsmart" ||
+      dt === "vbond" ||
+      dt === "vcontainer" ||
+      dt === "vmanage-system" ||
+      dt.startsWith("vmanage")
+    ) {
+      return true;
+    }
+    const host = String(row.hostname || "").trim().toLowerCase();
+    return host === "vmanage" || host === "vbond" || host === "vsmart" || host === "vsmart2";
+  }
+
+  /** Return true to keep the row visible (used with Tabulator ``addFilter``). */
+  function filterHideControlPlaneRows(data) {
+    return !isControlPlaneRow(data);
+  }
+
+  let showControlPlaneDevices = false;
+  try {
+    showControlPlaneDevices = window.localStorage.getItem(LS_SHOW_CONTROL) === "1";
+  } catch (_e) {
+    showControlPlaneDevices = false;
+  }
+
+  function syncControlPlaneToggleButton() {
+    const btn = document.getElementById("terra-devices-control-plane-btn");
+    if (!btn) {
+      return;
+    }
+    btn.setAttribute("aria-pressed", showControlPlaneDevices ? "true" : "false");
+    btn.textContent = showControlPlaneDevices ? "Hide control plane" : "Show control plane";
+    btn.title = showControlPlaneDevices
+      ? "Showing vManage, vSmart, vBond, and related controllers. Click to hide them and show WAN edges only."
+      : "WAN edges only. Click to include SD-WAN control-plane nodes (vManage, vSmart, vBond).";
+    btn.classList.toggle("terra-devices-control-plane-btn--active", showControlPlaneDevices);
+  }
+
+  function persistShowControlPlane() {
+    try {
+      window.localStorage.setItem(LS_SHOW_CONTROL, showControlPlaneDevices ? "1" : "0");
+    } catch (_e) {
+      /* ignore */
+    }
+  }
+
+  function applyControlPlaneRowFilter() {
+    try {
+      table.removeFilter(filterHideControlPlaneRows);
+    } catch (_e) {
+      /* filter may not be registered yet */
+    }
+    if (!showControlPlaneDevices) {
+      try {
+        table.addFilter(filterHideControlPlaneRows);
+      } catch (_e2) {
+        /* ignore */
+      }
+    }
   }
 
   function findRowFromPointer(table, target) {
@@ -266,6 +339,13 @@
       visible: false,
     },
     { title: "Manager", field: "manager", headerFilter: "input", minWidth: 110 },
+    {
+      title: "Tenant",
+      field: "tenant",
+      headerFilter: "input",
+      minWidth: 100,
+      visible: true,
+    },
   ];
   if (showOwner) {
     baseColumns.push({
@@ -303,7 +383,7 @@
     selectableRowsPersistence: false,
     initialSort: [{ column: "hostname", dir: "asc" }],
     persistence: { columns: true, sort: true },
-    persistenceID: showOwner ? "terra-devices-grid-v6-owner" : "terra-devices-grid-v6",
+    persistenceID: showOwner ? "terra-devices-grid-v9-owner" : "terra-devices-grid-v9",
     columns: baseColumns,
   });
 
@@ -316,6 +396,120 @@
 
   table.on("columnsLoaded", function () {
     syncSelectionColumn();
+    refreshColumnPickerCheckboxes();
+  });
+
+  function refreshColumnPickerCheckboxes() {
+    const panel = document.getElementById("terra-devices-columns-panel");
+    if (!panel) {
+      return;
+    }
+    panel.querySelectorAll('input[type="checkbox"][data-terra-col-field]').forEach(function (cb) {
+      const f = cb.getAttribute("data-terra-col-field");
+      if (!f) {
+        return;
+      }
+      try {
+        const col = table.getColumn(f);
+        cb.checked = !!(col && typeof col.isVisible === "function" && col.isVisible());
+      } catch (_e) {
+        cb.checked = false;
+      }
+    });
+  }
+
+  function wireColumnPicker() {
+    const panel = document.getElementById("terra-devices-columns-panel");
+    const btn = document.getElementById("terra-devices-columns-btn");
+    if (!panel || !btn) {
+      return;
+    }
+    if (columnPickerWired) {
+      refreshColumnPickerCheckboxes();
+      return;
+    }
+    columnPickerWired = true;
+
+    panel.innerHTML = "";
+    table.getColumns().forEach(function (col) {
+      const def = col.getDefinition();
+      const f = def.field;
+      if (!f || f === "_terra_sel") {
+        return;
+      }
+      const title = def.title != null ? String(def.title) : f;
+      const label = document.createElement("label");
+      label.className = "terra-devices-columns-item";
+      const cb = document.createElement("input");
+      cb.type = "checkbox";
+      cb.setAttribute("data-terra-col-field", f);
+      try {
+        cb.checked = typeof col.isVisible === "function" ? col.isVisible() : true;
+      } catch (_e) {
+        cb.checked = true;
+      }
+      cb.addEventListener("change", function () {
+        try {
+          const c = table.getColumn(f);
+          if (!c) {
+            return;
+          }
+          if (cb.checked && typeof c.show === "function") {
+            c.show();
+          } else if (!cb.checked && typeof c.hide === "function") {
+            c.hide();
+          }
+        } catch (_e2) {
+          /* ignore */
+        }
+        refreshColumnPickerCheckboxes();
+      });
+      const span = document.createElement("span");
+      span.textContent = title;
+      label.appendChild(cb);
+      label.appendChild(span);
+      panel.appendChild(label);
+    });
+
+    function setOpen(open) {
+      panel.hidden = !open;
+      btn.setAttribute("aria-expanded", open ? "true" : "false");
+    }
+
+    btn.addEventListener("click", function (ev) {
+      ev.preventDefault();
+      ev.stopPropagation();
+      setOpen(panel.hidden);
+      if (!panel.hidden) {
+        refreshColumnPickerCheckboxes();
+      }
+    });
+
+    document.addEventListener(
+      "click",
+      function (ev) {
+        if (panel.hidden) {
+          return;
+        }
+        if (btn.contains(ev.target) || panel.contains(ev.target)) {
+          return;
+        }
+        setOpen(false);
+      },
+      true,
+    );
+
+    document.addEventListener("keydown", function (ev) {
+      if (ev.key === "Escape" && !panel.hidden) {
+        setOpen(false);
+        btn.focus();
+      }
+    });
+  }
+
+  table.on("columnVisibilityChanged", function () {
+    refreshColumnPickerCheckboxes();
+    syncSelectionColumn();
   });
 
   table.on("pageLoaded", function () {
@@ -324,9 +518,20 @@
 
   table.on("tableBuilt", function () {
     syncSelectionColumn();
+    applyControlPlaneRowFilter();
+    syncControlPlaneToggleButton();
     const root = table.element;
     if (!root) {
       return;
+    }
+
+    /* Tabulator can restore header filters from persistence that hide every row; recover automatically. */
+    try {
+      if (data.length > 0 && table.getRows().length === 0) {
+        table.clearHeaderFilter();
+      }
+    } catch (_e) {
+      /* ignore */
     }
 
     root.addEventListener(
@@ -425,10 +630,13 @@
       true,
     );
     updateCompareButton();
+    wireColumnPicker();
   });
 
   queueMicrotask(function () {
     updateBulkBanner();
+    applyControlPlaneRowFilter();
+    syncControlPlaneToggleButton();
   });
 
   if (compareBtn) {
@@ -481,6 +689,24 @@
       } catch (err) {
         window.alert("Sync failed: " + err);
         syncBtn.removeAttribute("disabled");
+      }
+    });
+  }
+
+  const controlPlaneBtn = document.getElementById("terra-devices-control-plane-btn");
+  if (controlPlaneBtn) {
+    syncControlPlaneToggleButton();
+    controlPlaneBtn.addEventListener("click", function () {
+      showControlPlaneDevices = !showControlPlaneDevices;
+      persistShowControlPlane();
+      syncControlPlaneToggleButton();
+      applyControlPlaneRowFilter();
+      try {
+        if (data.length > 0 && table.getRows().length === 0) {
+          table.clearHeaderFilter();
+        }
+      } catch (_e) {
+        /* ignore */
       }
     });
   }

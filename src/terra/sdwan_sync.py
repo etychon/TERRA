@@ -6,6 +6,11 @@ import hashlib
 import json
 import logging
 import re
+import secrets
+import time
+from collections.abc import Callable
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from contextlib import suppress
 from datetime import UTC, datetime
 from typing import Any
 
@@ -13,15 +18,54 @@ import httpx
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from terra.app_log_buffer import append_event
 from terra.config import get_settings
+from terra.db import sdwan_batch_needs_serial_execution
 from terra.inventory_extract import deep_find_serial
 from terra.models import SdWanLinkStatus, SdWanManagerInstance, SyncedDevice
 from terra.sdwan_client import read_manager_version
 from terra.sdwan_dataservice_rows import rows_from_dataservice_body
 from terra.sdwan_device_live import enrich_inventory_row_for_sync
-from terra.sdwan_http import open_manager_http_client
+from terra.sdwan_http import open_manager_http_client, refresh_sdwan_dataservice_csrf_header
+from terra.sdwan_operator_log import clear_sdwan_http_log_tenant, set_sdwan_http_log_tenant
 
 logger = logging.getLogger(__name__)
+
+_FAIR_SYNC_EPOCH = datetime(1970, 1, 1, tzinfo=UTC)
+
+
+def _inventory_stale_sort_key(dt: datetime | None) -> float:
+    """Sort oldest / never-synced managers first (timezone-safe)."""
+    if dt is None:
+        return _FAIR_SYNC_EPOCH.timestamp()
+    if dt.tzinfo is None:
+        return dt.replace(tzinfo=UTC).timestamp()
+    return dt.timestamp()
+
+
+def _inventory_http_timeout_seconds() -> float:
+    return float(get_settings().sdwan_sync_inventory_timeout_seconds)
+
+
+class SdWanSyncCancelled(Exception):
+    """Raised when an operator cancels an in-progress async inventory sync."""
+
+
+def _raise_if_cancelled(cancel_check: Callable[[], bool] | None) -> None:
+    if cancel_check is not None and cancel_check():
+        raise SdWanSyncCancelled()
+
+
+def _progress_notify(
+    cb: Callable[[str, int, str], None] | None,
+    phase: str,
+    percent: int,
+    message: str,
+) -> None:
+    if cb is None:
+        return
+    with suppress(Exception):
+        cb(phase, min(100, max(0, int(percent))), message)
 
 # When GET /dataservice/device returns no rows (some lab / CVD builds), try controller inventories.
 _FALLBACK_DEVICE_PATHS: tuple[str, ...] = (
@@ -191,10 +235,80 @@ def _stable_device_key(row: dict[str, Any]) -> str:
     return f"synthetic-{digest}"
 
 
-def fetch_device_inventory(client: httpx.Client, base_url: str) -> list[dict[str, Any]]:
+def _tenant_switch_id(row: dict[str, Any]) -> str:
+    """Resolve the path segment for ``POST …/tenant/{id}/switch``."""
+    for k in ("tenantId", "id", "uuid", "tenant_id", "tenantUUID"):
+        s = _scalar_to_str(row.get(k))
+        if s:
+            return s[:160]
+    return ""
+
+
+def _tenant_display_name(row: dict[str, Any]) -> str:
+    for k in ("name", "orgName", "organizationName", "desc"):
+        s = _scalar_to_str(row.get(k))
+        if s:
+            return s[:255]
+    return _tenant_switch_id(row)[:255]
+
+
+def fetch_tenant_list(
+    client: httpx.Client, base_url: str, *, request_timeout: float | None = None
+) -> list[dict[str, Any]]:
+    """
+    ``GET /dataservice/tenant`` — non-multitenant / inaccessible builds return an empty list
+    (HTTP 400/403/404/405 treated as non-MT; some managers use 400 when the tenant API is not in use).
+    """
+    base = base_url.rstrip("/")
+    to = float(request_timeout) if request_timeout is not None else _inventory_http_timeout_seconds()
+    r = client.get(f"{base}/dataservice/tenant", headers={"Accept": "application/json"}, timeout=to)
+    # Non-multitenant / legacy builds: tenant API missing, not applicable, or not allowed for this token.
+    if r.status_code in (400, 403, 404, 405):
+        return []
+    if r.status_code >= 400:
+        msg = f"tenant list HTTP {r.status_code}"
+        raise RuntimeError(msg)
+    try:
+        body = r.json()
+    except ValueError as e:
+        msg = "tenant list invalid JSON"
+        raise RuntimeError(msg) from e
+    return rows_from_dataservice_body(body)
+
+
+def switch_tenant(
+    client: httpx.Client, base_url: str, tenant_id: str, *, request_timeout: float | None = None
+) -> None:
+    """``POST /dataservice/tenant/{tenantId}/switch`` — subsequent dataservice calls use tenant scope."""
+    tid = str(tenant_id).strip()
+    if not tid:
+        msg = "tenant id required for switch"
+        raise ValueError(msg)
+    base = base_url.rstrip("/")
+    to = float(request_timeout) if request_timeout is not None else _inventory_http_timeout_seconds()
+    # VSessionId from a prior vsession call breaks some GETs (e.g. /device); tenant switch uses cookies + CSRF.
+    client.headers.pop("VSessionId", None)
+    r = client.post(
+        f"{base}/dataservice/tenant/{tid}/switch",
+        headers={"Accept": "application/json"},
+        json={},
+        timeout=to,
+    )
+    if r.status_code >= 400:
+        msg = f"tenant switch HTTP {r.status_code}"
+        raise RuntimeError(msg)
+
+
+def fetch_device_inventory(
+    client: httpx.Client,
+    base_url: str,
+    *,
+    request_timeout: float | None = None,
+) -> list[dict[str, Any]]:
     """GET /dataservice/device (and fallbacks) — full inventory list."""
     base = base_url.rstrip("/")
-    r = client.get(f"{base}/dataservice/device", headers={"Accept": "application/json"})
+    to = float(request_timeout) if request_timeout is not None else _inventory_http_timeout_seconds()
+    r = client.get(f"{base}/dataservice/device", headers={"Accept": "application/json"}, timeout=to)
     if r.status_code >= 400:
         msg = f"device inventory HTTP {r.status_code}"
         raise RuntimeError(msg)
@@ -224,7 +338,7 @@ def fetch_device_inventory(client: httpx.Client, base_url: str) -> list[dict[str
 
     if not merged:
         for path in _FALLBACK_DEVICE_PATHS:
-            r2 = client.get(f"{base}/dataservice/{path}", headers={"Accept": "application/json"})
+            r2 = client.get(f"{base}/dataservice/{path}", headers={"Accept": "application/json"}, timeout=to)
             if r2.status_code >= 400:
                 continue
             try:
@@ -236,58 +350,213 @@ def fetch_device_inventory(client: httpx.Client, base_url: str) -> list[dict[str
     return [merged[k] for k in order]
 
 
-def sync_devices_for_instance(db: Session, secret_key: str, inst: SdWanManagerInstance) -> tuple[int, str | None]:
+def _gather_inventory_with_tenant_scopes(
+    client: httpx.Client,
+    base_url: str,
+    *,
+    inventory_timeout: float | None = None,
+) -> tuple[list[tuple[dict[str, Any], str, str]], bool]:
+    """
+    Build (raw_row, sdwan_tenant_id, sdwan_tenant_name) tuples.
+    For single-tenant Managers, tenant fields are ``""``.
+    Returns (rows, any_tenant_phase_error); when the second value is True, callers must not prune stale rows.
+    """
+    to = float(inventory_timeout) if inventory_timeout is not None else _inventory_http_timeout_seconds()
+    tenants = fetch_tenant_list(client, base_url, request_timeout=to)
+    if not tenants:
+        clear_sdwan_http_log_tenant()
+        inv = fetch_device_inventory(client, base_url, request_timeout=to)
+        return [(r, "", "") for r in inv], False
+
+    switchable = [t for t in tenants if isinstance(t, dict) and _tenant_switch_id(t)]
+    if not switchable:
+        logger.warning(
+            "SD-WAN multitenant: /dataservice/tenant returned rows but none had a usable tenant id for switch"
+        )
+        return [], True
+
+    refresh_sdwan_dataservice_csrf_header(client, base_url)
+
+    out: list[tuple[dict[str, Any], str, str]] = []
+    any_err = False
+    for t in switchable:
+        tid_key = _tenant_switch_id(t)[:160]
+        label = (_tenant_display_name(t) or tid_key)[:255]
+        set_sdwan_http_log_tenant(label or tid_key)
+        try:
+            switch_tenant(client, base_url, tid_key, request_timeout=to)
+        except (RuntimeError, ValueError, httpx.RequestError, OSError) as e:
+            logger.warning("SD-WAN tenant switch failed (tenant_id=%s): %s", tid_key, e)
+            any_err = True
+            continue
+        try:
+            batch = fetch_device_inventory(client, base_url, request_timeout=to)
+        except (RuntimeError, ValueError, httpx.RequestError, OSError) as e:
+            logger.warning("SD-WAN inventory after tenant switch failed (tenant_id=%s): %s", tid_key, e)
+            any_err = True
+            continue
+        for raw in batch:
+            out.append((raw, tid_key, label))
+    if not out:
+        clear_sdwan_http_log_tenant()
+        try:
+            inv = fetch_device_inventory(client, base_url, request_timeout=to)
+            if inv:
+                out = [(r, "", "") for r in inv]
+                any_err = False
+        except (RuntimeError, ValueError, httpx.RequestError, OSError):
+            logger.debug("SD-WAN provider-level fallback inventory failed", exc_info=True)
+    return out, any_err
+
+
+def _delete_stale_devices_for_instance(db: Session, instance_id: int, seen: set[tuple[str, str]]) -> None:
+    """Remove DB rows not present in the last successful full inventory pull for this Manager."""
+    q = select(SyncedDevice).where(SyncedDevice.sdwan_instance_id == instance_id)
+    for d in list(db.scalars(q)):
+        key = ((d.sdwan_tenant_id or "").strip(), d.source_device_uuid)
+        if key not in seen:
+            db.delete(d)
+
+
+def sync_devices_for_instance(
+    db: Session,
+    secret_key: str,
+    inst: SdWanManagerInstance,
+    progress_notify: Callable[[str, int, str], None] | None = None,
+    cancel_check: Callable[[], bool] | None = None,
+) -> tuple[int, str | None]:
     """
     Upsert devices for one Manager instance. Returns (rows_touched, error_message).
     All timestamps written in UTC.
+
+    ``progress_notify(phase, percent, message)`` is optional UI feedback (async sync jobs).
+    ``cancel_check`` returns True when the operator requested cancellation (cooperative; checked between steps).
     """
     if inst.link_status != SdWanLinkStatus.connected.value:
+        _progress_notify(progress_notify, "failed", 100, "Manager is not connected — run Verify first.")
         return 0, "instance not connected"
 
     now = _utcnow()
     touched = 0
+    seen: set[tuple[str, str]] = set()
+    tenant_phase_errors = False
     try:
         settings = get_settings()
+        inv_to = float(settings.sdwan_sync_inventory_timeout_seconds)
+        _raise_if_cancelled(cancel_check)
+        _progress_notify(progress_notify, "connecting", 6, "Opening HTTP session to SD-WAN Manager…")
         with open_manager_http_client(secret_key, inst) as client:
-            rows = fetch_device_inventory(client, inst.base_url)
-            if not inst.manager_version:
-                mv = read_manager_version(client, inst.base_url)
-                if mv:
-                    inst.manager_version = mv[:128]
+            _progress_notify(progress_notify, "connected", 14, "Session ready — downloading device inventory…")
+            rows_scoped, tenant_phase_errors = _gather_inventory_with_tenant_scopes(
+                client, inst.base_url, inventory_timeout=inv_to
+            )
+            _raise_if_cancelled(cancel_check)
+            _progress_notify(
+                progress_notify,
+                "inventory",
+                32,
+                f"Inventory received ({len(rows_scoped)} row(s)) — reading Manager version…",
+            )
+            mv = read_manager_version(client, inst.base_url, request_timeout=inv_to)
+            if mv:
+                inst.manager_version = mv[:128]
 
             enrich = (
                 settings.sdwan_sync_enrich_device_details
-                and len(rows) <= settings.sdwan_sync_enrich_max_inventory_devices
+                and len(rows_scoped) <= settings.sdwan_sync_enrich_max_inventory_devices
             )
-            if enrich and rows:
-                enriched: list[dict[str, Any]] = []
-                for raw in rows:
+            if enrich and rows_scoped:
+                enriched_scoped: list[tuple[dict[str, Any], str, str]] = []
+                n_en = len(rows_scoped)
+                step = max(1, n_en // 10)
+                for i, (raw, tid_scope, tname_scope) in enumerate(rows_scoped):
+                    _raise_if_cancelled(cancel_check)
+                    tlog = (tname_scope or tid_scope or "").strip()
+                    set_sdwan_http_log_tenant(tlog)
+                    if progress_notify and (i % step == 0 or i == n_en - 1):
+                        _progress_notify(
+                            progress_notify,
+                            "enriching",
+                            38 + min(22, int(22 * i / max(n_en, 1))),
+                            f"Enriching device details ({i + 1} of {n_en})…",
+                        )
                     try:
-                        enriched.append(
-                            enrich_inventory_row_for_sync(
-                                client,
-                                inst.base_url,
-                                raw,
-                                request_timeout=settings.sdwan_sync_enrich_request_timeout_seconds,
+                        enriched_scoped.append(
+                            (
+                                enrich_inventory_row_for_sync(
+                                    client,
+                                    inst.base_url,
+                                    raw,
+                                    request_timeout=settings.sdwan_sync_enrich_request_timeout_seconds,
+                                ),
+                                tid_scope,
+                                tname_scope,
                             )
                         )
                     except Exception:
-                        logger.debug("SD-WAN per-device enrich failed (instance id=%s)", inst.id, exc_info=True)
-                        enriched.append(raw)
-                rows = enriched
+                        logger.debug(
+                            "SD-WAN per-device enrich failed (instance id=%s name=%r)",
+                            inst.id,
+                            inst.display_name,
+                            exc_info=True,
+                        )
+                        enriched_scoped.append((raw, tid_scope, tname_scope))
+                rows_scoped = enriched_scoped
+            elif rows_scoped:
+                _progress_notify(
+                    progress_notify,
+                    "inventory",
+                    44,
+                    "Skipping per-device enrichment (disabled or large fleet).",
+                )
     except (RuntimeError, ValueError, httpx.RequestError, OSError) as e:
-        logger.warning("SD-WAN device sync failed for instance %s: %s", inst.id, e)
-        return 0, str(e)[:500]
+        msg = str(e)[:500]
+        inst.last_error = f"Inventory sync: {msg}"[:1000]
+        db.add(inst)
+        logger.warning(
+            "SD-WAN device sync failed for instance %s (%s): %s",
+            inst.id,
+            inst.display_name,
+            e,
+        )
+        _progress_notify(progress_notify, "failed", 100, msg)
+        return 0, msg
 
-    for raw in rows:
+    if not rows_scoped and tenant_phase_errors:
+        msg = (
+            "Multitenant inventory returned no devices after tenant switching "
+            "(tenant switch or per-tenant /dataservice/device failed, XSRF rejected, or empty responses). "
+            "Confirm the API token has Device read scope; for JWT, CSRF must be accepted after "
+            "GET /dataservice/client/server."
+        )[:500]
+        inst.last_error = f"Inventory sync: {msg}"[:1000]
+        db.add(inst)
+        _progress_notify(progress_notify, "failed", 100, msg)
+        return 0, msg
+
+    n_save = len(rows_scoped)
+    step_s = max(1, n_save // 10)
+    for si, (raw, tenant_id_scope, tenant_name_scope) in enumerate(rows_scoped):
+        _raise_if_cancelled(cancel_check)
+        if progress_notify and n_save and (si % step_s == 0 or si == n_save - 1):
+            _progress_notify(
+                progress_notify,
+                "saving",
+                62 + min(28, int(28 * si / max(n_save, 1))),
+                f"Writing devices to database ({si + 1} of {n_save})…",
+            )
         norm = normalize_inventory_row(raw)
         if not norm["source_device_uuid"]:
             continue
         uid = str(norm["source_device_uuid"])[:160]
+        tid = (tenant_id_scope or "")[:160]
+        tlabel = (tenant_name_scope or "")[:255]
+        seen.add((tid, uid))
         existing = db.execute(
             select(SyncedDevice).where(
                 SyncedDevice.sdwan_instance_id == inst.id,
                 SyncedDevice.source_device_uuid == uid,
+                SyncedDevice.sdwan_tenant_id == tid,
             )
         ).scalar_one_or_none()
 
@@ -299,6 +568,8 @@ def sync_devices_for_instance(db: Session, secret_key: str, inst: SdWanManagerIn
                 SyncedDevice(
                     sdwan_instance_id=inst.id,
                     source_device_uuid=uid,
+                    sdwan_tenant_id=tid,
+                    sdwan_tenant_name=tlabel,
                     hostname=str(norm["hostname"])[:255],
                     serial_number=str(norm["serial_number"])[:128],
                     model=str(norm["model"])[:128],
@@ -326,46 +597,298 @@ def sync_devices_for_instance(db: Session, secret_key: str, inst: SdWanManagerIn
         existing.reachability = new_r[:32]
         existing.synced_at_utc = now
         existing.raw_json = raw_json
+        existing.sdwan_tenant_name = tlabel
         touched += 1
 
+    if not tenant_phase_errors:
+        _raise_if_cancelled(cancel_check)
+        _delete_stale_devices_for_instance(db, inst.id, seen)
+
+    _raise_if_cancelled(cancel_check)
+    _progress_notify(progress_notify, "finishing", 96, "Finalizing inventory…")
     inst.devices_last_sync_at_utc = now
+    if inst.last_error and str(inst.last_error).startswith("Inventory sync:"):
+        inst.last_error = None
     db.add(inst)
+    _progress_notify(progress_notify, "complete", 100, "Inventory sync complete.")
     return touched, None
 
 
-def sync_user_sdwan_devices(db: Session, secret_key: str, user_id: int) -> dict[str, int]:
-    """Sync inventory for all connected managers owned by one user."""
-    q = select(SdWanManagerInstance).where(
-        SdWanManagerInstance.user_id == user_id,
-        SdWanManagerInstance.link_status == SdWanLinkStatus.connected.value,
+def _sync_one_manager_worker(secret_key: str, instance_id: int) -> dict[str, Any]:
+    """Sync one Manager in an isolated DB session (for concurrent batch workers)."""
+    from terra.db import get_session_factory
+
+    t0 = time.perf_counter()
+    out: dict[str, Any] = {
+        "instance_id": instance_id,
+        "cluster": "(unknown)",
+        "rows": 0,
+        "error": None,
+        "crashed": False,
+    }
+    sf = get_session_factory()
+    try:
+        with sf() as db:
+            inst = db.get(SdWanManagerInstance, instance_id)
+            if inst is None:
+                out["cluster"] = "(missing)"
+                out["error"] = "instance not found"
+                return out
+            out["cluster"] = (inst.display_name or "").strip() or f"id:{instance_id}"
+            if inst.link_status != SdWanLinkStatus.connected.value:
+                out["error"] = "not connected"
+                return out
+            try:
+                n, err = sync_devices_for_instance(db, secret_key, inst)
+                db.commit()
+            except Exception:
+                logger.exception(
+                    "SD-WAN batch worker crashed instance_id=%s",
+                    instance_id,
+                )
+                db.rollback()
+                out["crashed"] = True
+                out["error"] = "worker crashed"
+                return out
+            out["rows"] = max(int(n), 0)
+            out["error"] = err
+    except Exception:
+        logger.exception("SD-WAN batch worker session error instance_id=%s", instance_id)
+        out["crashed"] = True
+        out["error"] = "session error"
+    finally:
+        out["duration_ms"] = int((time.perf_counter() - t0) * 1000)
+    return out
+
+
+def _execute_sdwan_manager_sync_batch(
+    secret_key: str,
+    sorted_instance_ids: list[int],
+    *,
+    run_id: str,
+    batch_kind: str,
+) -> list[dict[str, Any]]:
+    """
+    Run inventory sync for each instance id with bounded concurrency.
+
+    ``batch_kind`` is ``periodic`` (background loop) or ``user_bulk`` (POST all managers); log text only.
+
+    Emits ``append_event`` (``sdwan_sync_batch``) and structured ``logger`` lines per instance and batch.
+    """
+    settings = get_settings()
+    n_m = len(sorted_instance_ids)
+    max_w = max(1, min(int(settings.sdwan_batch_max_concurrent_managers), n_m or 1))
+    if sdwan_batch_needs_serial_execution():
+        max_w = 1
+    label = "Periodic" if batch_kind == "periodic" else "User bulk"
+    t_batch = time.perf_counter()
+
+    append_event(
+        "INFO",
+        "sdwan_sync_batch",
+        f"{label} SD-WAN sync batch started ({n_m} manager(s))",
+        detail=f"run_id={run_id} managers={n_m} max_concurrent={max_w} batch_kind={batch_kind}",
     )
-    instances = list(db.scalars(q))
-    rows = 0
-    errors = 0
-    for inst in instances:
-        n, err = sync_devices_for_instance(db, secret_key, inst)
-        rows += max(n, 0)
-        if err:
-            errors += 1
-    db.commit()
-    return {"managers": len(instances), "rows_touched": rows, "errors": errors}
+    logger.info(
+        "%s SD-WAN sync batch started run_id=%s managers=%s max_concurrent=%s kind=%s",
+        label,
+        run_id,
+        n_m,
+        max_w,
+        batch_kind,
+        extra={
+            "terra_sdwan_run_id": run_id,
+            "terra_sdwan_managers": n_m,
+            "terra_sdwan_max_concurrent": max_w,
+            "terra_sdwan_batch_kind": batch_kind,
+            "terra_sdwan_phase": "batch_start",
+        },
+    )
+
+    results: list[dict[str, Any]] = []
+    if not sorted_instance_ids:
+        wall_ms = 0
+        append_event(
+            "INFO",
+            "sdwan_sync_batch",
+            f"{label} SD-WAN sync batch completed (0 managers)",
+            detail=f"run_id={run_id} wall_ms={wall_ms} ok=0 warn=0 err=0 rows=0",
+        )
+        logger.info(
+            "%s SD-WAN sync batch completed run_id=%s managers=0 wall_ms=0",
+            label,
+            run_id,
+            extra={"terra_sdwan_run_id": run_id, "terra_sdwan_phase": "batch_end", "terra_sdwan_wall_ms": 0},
+        )
+        return results
+
+    with ThreadPoolExecutor(max_workers=max_w, thread_name_prefix="terra-sdwan-batch") as pool:
+        future_map = {pool.submit(_sync_one_manager_worker, secret_key, iid): iid for iid in sorted_instance_ids}
+        for fut in as_completed(future_map):
+            iid = future_map[fut]
+            try:
+                res = fut.result()
+            except Exception:
+                logger.exception("SD-WAN batch future failed instance_id=%s", iid)
+                res = {
+                    "instance_id": iid,
+                    "cluster": "(unknown)",
+                    "rows": 0,
+                    "error": "future failed",
+                    "crashed": True,
+                    "duration_ms": 0,
+                }
+            results.append(res)
+            det = (
+                f'run_id={run_id} instance_id={res["instance_id"]} cluster="{res["cluster"]}" '
+                f'duration_ms={res["duration_ms"]} rows={res["rows"]}'
+            )
+            if res.get("error"):
+                det += f' error={str(res["error"])[:400]}'
+            if res.get("crashed"):
+                append_event("ERROR", "sdwan_sync_batch", f"Manager sync failed ({batch_kind})", detail=det[:4000])
+                logger.error(
+                    (
+                        "SD-WAN batch instance done run_id=%s instance_id=%s cluster=%r "
+                        "duration_ms=%s rows=%s crashed=1"
+                    ),
+                    run_id,
+                    res["instance_id"],
+                    res["cluster"],
+                    res["duration_ms"],
+                    res["rows"],
+                    extra={
+                        "terra_sdwan_run_id": run_id,
+                        "terra_sdwan_phase": "instance_done",
+                        "terra_sdwan_instance_id": res["instance_id"],
+                        "terra_sdwan_duration_ms": res["duration_ms"],
+                        "terra_sdwan_rows": res["rows"],
+                        "terra_sdwan_crashed": True,
+                    },
+                )
+            elif res.get("error"):
+                append_event(
+                    "WARNING",
+                    "sdwan_sync_batch",
+                    f"Manager sync finished with error ({batch_kind})",
+                    detail=det[:4000],
+                )
+                logger.warning(
+                    "SD-WAN batch instance done run_id=%s instance_id=%s cluster=%r duration_ms=%s rows=%s err=%s",
+                    run_id,
+                    res["instance_id"],
+                    res["cluster"],
+                    res["duration_ms"],
+                    res["rows"],
+                    res["error"],
+                    extra={
+                        "terra_sdwan_run_id": run_id,
+                        "terra_sdwan_phase": "instance_done",
+                        "terra_sdwan_instance_id": res["instance_id"],
+                        "terra_sdwan_duration_ms": res["duration_ms"],
+                        "terra_sdwan_rows": res["rows"],
+                        "terra_sdwan_error": str(res["error"])[:500],
+                    },
+                )
+            else:
+                append_event("INFO", "sdwan_sync_batch", f"Manager sync ok ({batch_kind})", detail=det[:4000])
+                logger.info(
+                    "SD-WAN batch instance done run_id=%s instance_id=%s cluster=%r duration_ms=%s rows=%s",
+                    run_id,
+                    res["instance_id"],
+                    res["cluster"],
+                    res["duration_ms"],
+                    res["rows"],
+                    extra={
+                        "terra_sdwan_run_id": run_id,
+                        "terra_sdwan_phase": "instance_done",
+                        "terra_sdwan_instance_id": res["instance_id"],
+                        "terra_sdwan_duration_ms": res["duration_ms"],
+                        "terra_sdwan_rows": res["rows"],
+                    },
+                )
+
+    wall_ms = int((time.perf_counter() - t_batch) * 1000)
+    ok_n = sum(1 for r in results if not r.get("error") and not r.get("crashed"))
+    warn_n = sum(1 for r in results if r.get("error") and not r.get("crashed"))
+    err_n = sum(1 for r in results if r.get("crashed"))
+    total_rows = sum(int(r.get("rows") or 0) for r in results)
+    append_event(
+        "INFO",
+        "sdwan_sync_batch",
+        f"{label} SD-WAN sync batch completed ({n_m} manager(s))",
+        detail=(
+            f"run_id={run_id} wall_ms={wall_ms} ok={ok_n} warn={warn_n} err={err_n} rows={total_rows} "
+            f"max_concurrent={max_w}"
+        )[:4000],
+    )
+    logger.info(
+        "%s SD-WAN sync batch completed run_id=%s managers=%s wall_ms=%s ok=%s warn=%s err=%s rows=%s",
+        label,
+        run_id,
+        n_m,
+        wall_ms,
+        ok_n,
+        warn_n,
+        err_n,
+        total_rows,
+        extra={
+            "terra_sdwan_run_id": run_id,
+            "terra_sdwan_phase": "batch_end",
+            "terra_sdwan_wall_ms": wall_ms,
+            "terra_sdwan_ok": ok_n,
+            "terra_sdwan_warn": warn_n,
+            "terra_sdwan_err": err_n,
+            "terra_sdwan_rows": total_rows,
+            "terra_sdwan_managers": n_m,
+        },
+    )
+    return results
+
+
+def sync_user_sdwan_devices(db: Session, secret_key: str, user_id: int) -> dict[str, int]:
+    """Sync inventory for all connected managers owned by one user (bounded concurrency; isolated sessions)."""
+    run_id = secrets.token_hex(4)
+    pairs = list(
+        db.execute(
+            select(SdWanManagerInstance.id, SdWanManagerInstance.devices_last_sync_at_utc).where(
+                SdWanManagerInstance.user_id == user_id,
+                SdWanManagerInstance.link_status == SdWanLinkStatus.connected.value,
+            )
+        ).all()
+    )
+    sorted_ids = [
+        r.id
+        for r in sorted(
+            pairs,
+            key=lambda row: _inventory_stale_sort_key(row.devices_last_sync_at_utc),
+        )
+    ]
+    results = _execute_sdwan_manager_sync_batch(secret_key, sorted_ids, run_id=run_id, batch_kind="user_bulk")
+    rows = sum(int(r.get("rows") or 0) for r in results)
+    errors = sum(1 for r in results if r.get("error") or r.get("crashed"))
+    return {"managers": len(sorted_ids), "rows_touched": rows, "errors": errors}
 
 
 def sync_all_connected_managers(secret_key: str) -> None:
-    """Background batch: sync every Manager row marked connected (all users)."""
+    """Background batch: sync every Manager row marked connected (all users), fair order, bounded concurrency."""
     from terra.db import get_session_factory
 
+    run_id = secrets.token_hex(4)
     sf = get_session_factory()
     with sf() as db:
-        q = select(SdWanManagerInstance).where(SdWanManagerInstance.link_status == SdWanLinkStatus.connected.value)
-        instances = list(db.scalars(q))
-        for inst in instances:
-            try:
-                sync_devices_for_instance(db, secret_key, inst)
-            except Exception:
-                logger.exception("SD-WAN sync crashed for instance id=%s", inst.id)
-            try:
-                db.commit()
-            except Exception:
-                logger.exception("SD-WAN sync commit failed")
-                db.rollback()
+        rows = list(
+            db.execute(
+                select(SdWanManagerInstance.id, SdWanManagerInstance.devices_last_sync_at_utc).where(
+                    SdWanManagerInstance.link_status == SdWanLinkStatus.connected.value,
+                ),
+            ).all()
+        )
+    sorted_ids = [
+        r.id
+        for r in sorted(
+            rows,
+            key=lambda row: _inventory_stale_sort_key(row.devices_last_sync_at_utc),
+        )
+    ]
+    _execute_sdwan_manager_sync_batch(secret_key, sorted_ids, run_id=run_id, batch_kind="periodic")

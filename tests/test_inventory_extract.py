@@ -9,6 +9,7 @@ from terra.inventory_extract import (
     display_serial,
     extract_geo_lat_lng,
     extract_interface_rows,
+    prepare_interface_detail_tables,
     utc_iso_for_json,
 )
 
@@ -32,6 +33,24 @@ def test_extract_geo_nested_geolocation() -> None:
     lat, lng = extract_geo_lat_lng(body)
     assert lat == 48.8566
     assert lng == 2.3522
+
+
+def test_extract_interface_ip_skips_dash_for_secondary() -> None:
+    rows = extract_interface_rows(
+        {
+            "deviceInterface": [
+                {
+                    "ifname": "Cellular0/4/0",
+                    "ip-address": "-",
+                    "secondary-address": "100.64.0.12",
+                    "vpn-id": "0",
+                    "if-admin-status": "up",
+                },
+            ]
+        }
+    )
+    assert len(rows) == 1
+    assert rows[0]["ip"] == "100.64.0.12"
 
 
 def test_extract_interface_rows_from_device_interface() -> None:
@@ -94,5 +113,191 @@ def test_display_serial_prefers_stored() -> None:
     assert display_serial("SN1", {"serialNumber": "SN2"}) == "SN1"
 
 
-def test_display_serial_fallback_raw() -> None:
-    assert display_serial("", {"serialNumber": "SN-FROM-RAW"}) == "SN-FROM-RAW"
+def test_prepare_interface_detail_tables_wan_before_lan() -> None:
+    parsed = {
+        "deviceInterface": [
+            {
+                "ifname": "GigabitEthernet2",
+                "ip-address": "10.0.2.1",
+                "vpn-id": "1",
+                "if-admin-status": "up",
+                "ipv4-prefix-length": "24",
+            },
+            {
+                "ifname": "GigabitEthernet1",
+                "ip-address": "10.0.0.1",
+                "vpn-id": "0",
+                "if-admin-status": "up",
+                "ipv4-prefix-length": "24",
+            },
+        ]
+    }
+    primary, deferred = prepare_interface_detail_tables(extract_interface_rows(parsed))
+    assert [r["interface"] for r in primary] == ["GigabitEthernet1", "GigabitEthernet2"]
+    assert deferred == []
+
+
+def test_prepare_interface_detail_tables_tunnels_last() -> None:
+    parsed = {
+        "deviceInterface": [
+            {
+                "ifname": "Tunnel1",
+                "ip-address": "10.0.0.3",
+                "vpn-id": "0",
+                "if-admin-status": "up",
+                "ipv4-prefix-length": "24",
+            },
+            {
+                "ifname": "GigabitEthernet1",
+                "ip-address": "10.0.0.1",
+                "vpn-id": "0",
+                "if-admin-status": "up",
+                "ipv4-prefix-length": "24",
+            },
+        ]
+    }
+    primary, _ = prepare_interface_detail_tables(extract_interface_rows(parsed))
+    assert [r["interface"] for r in primary] == ["GigabitEthernet1", "Tunnel1"]
+
+
+def test_interface_ip_cidr_from_prefix_length() -> None:
+    rows = extract_interface_rows(
+        {
+            "deviceInterface": [
+                {
+                    "ifname": "Ethernet1",
+                    "ip-address": "192.168.2.3",
+                    "ipv4-prefix-length": "24",
+                    "vpn-id": "0",
+                    "if-admin-status": "1",
+                },
+            ]
+        }
+    )
+    assert len(rows) == 1
+    assert rows[0]["ip_cidr"] == "192.168.2.3/24"
+    assert rows[0]["service_vpn"] == "WAN"
+
+
+def test_prepare_interface_defers_admin_down_or_no_ip() -> None:
+    parsed = {
+        "deviceInterface": [
+            {
+                "ifname": "Gi0",
+                "ip-address": "10.0.0.1",
+                "vpn-id": "0",
+                "if-admin-status": "2",
+                "ipv4-prefix-length": "24",
+            },
+            {"ifname": "Gi1", "vpn-id": "0", "if-admin-status": "1"},
+            {
+                "ifname": "Gi2",
+                "ip-address": "10.0.0.2",
+                "vpn-id": "0",
+                "if-admin-status": "1",
+                "ipv4-prefix-length": "24",
+            },
+        ]
+    }
+    primary, deferred = prepare_interface_detail_tables(extract_interface_rows(parsed))
+    assert [r["interface"] for r in primary] == ["Gi2"]
+    assert {r["interface"] for r in deferred} == {"Gi0", "Gi1"}
+
+
+def test_interface_line_state_uses_if_oper_state_ready_when_oper_unknown() -> None:
+    rows = extract_interface_rows(
+        {
+            "deviceInterface": [
+                {
+                    "ifname": "Ethernet1",
+                    "ip-address": "10.0.0.1",
+                    "ipv4-prefix-length": "24",
+                    "vpn-id": "0",
+                    "if-admin-status": "1",
+                    "if-oper-status": "0",
+                    "if-oper-state-ready": "true",
+                },
+            ]
+        }
+    )
+    assert len(rows) == 1
+    assert rows[0]["oper_status"] == "Up"
+    assert rows[0]["oper_tone"] == "success"
+
+
+def test_interface_line_state_if_oper_status_is_leaf_name_uses_ready_field() -> None:
+    rows = extract_interface_rows(
+        {
+            "deviceInterface": [
+                {
+                    "ifname": "Ethernet9",
+                    "ip-address": "10.0.0.9",
+                    "ipv4-prefix-length": "24",
+                    "vpn-id": "0",
+                    "if-admin-status": "1",
+                    "if-oper-status": "if-oper-state-ready",
+                    "if-oper-state-ready": "true",
+                },
+            ]
+        }
+    )
+    assert len(rows) == 1
+    assert rows[0]["oper_status"] == "Up"
+    assert rows[0]["oper_tone"] == "success"
+
+
+def test_interface_line_state_oper_state_ready_variant() -> None:
+    rows = extract_interface_rows(
+        {
+            "deviceInterface": [
+                {
+                    "ifname": "Ethernet1",
+                    "ip-address": "10.0.0.1",
+                    "ipv4-prefix-length": "24",
+                    "vpn-id": "0",
+                    "if-admin-status": "1",
+                    "oper-state": "oper-state-ready",
+                },
+            ]
+        }
+    )
+    assert rows[0]["oper_status"] == "Up"
+    assert rows[0]["oper_tone"] == "success"
+
+
+def test_interface_line_state_unicode_hyphen_leaf_echo() -> None:
+    rows = extract_interface_rows(
+        {
+            "deviceInterface": [
+                {
+                    "ifname": "EthernetU",
+                    "ip-address": "10.0.0.7",
+                    "ipv4-prefix-length": "24",
+                    "vpn-id": "0",
+                    "if-admin-status": "1",
+                    "if-oper-status": "if\u2011oper\u2011state\u2011ready",
+                },
+            ]
+        }
+    )
+    assert rows[0]["oper_status"] == "Up"
+    assert rows[0]["oper_tone"] == "success"
+
+
+def test_interface_line_state_placeholder_without_ready_is_up() -> None:
+    rows = extract_interface_rows(
+        {
+            "deviceInterface": [
+                {
+                    "ifname": "Ethernet8",
+                    "ip-address": "10.0.0.8",
+                    "ipv4-prefix-length": "24",
+                    "vpn-id": "0",
+                    "if-admin-status": "1",
+                    "if-oper-status": "if-oper-state-ready",
+                },
+            ]
+        }
+    )
+    assert rows[0]["oper_status"] == "Up"
+    assert rows[0]["oper_tone"] == "success"

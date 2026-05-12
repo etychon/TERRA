@@ -1,0 +1,117 @@
+/* Admin Logs page — semantic tokens only (see terra-auth.css) */
+
+.terra-logs-card {
+  min-height: 60vh;
+}
+
+.terra-logs-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 0.75rem 1rem;
+  margin: 1rem 0 0.75rem;
+}
+
+.terra-logs-search {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  flex: 1 1 14rem;
+}
+
+.terra-logs-search-label {
+  font-size: 0.75rem;
+  color: hsl(var(--muted-foreground));
+}
+
+.terra-logs-search-input {
+  width: 100%;
+  max-width: 28rem;
+}
+
+.terra-logs-stream {
+  margin-top: 0.5rem;
+  max-height: min(70vh, 52rem);
+  overflow-y: auto;
+  border-radius: var(--radius);
+  border: 1px solid hsl(var(--border) / 0.65);
+  background: hsl(var(--surface-container-low) / 0.92);
+  font-family: "Roboto Mono", ui-monospace, monospace;
+  font-size: 0.75rem;
+  line-height: 1.45;
+}
+
+.terra-log-row {
+  display: grid;
+  grid-template-columns: 9.5rem 5.5rem minmax(6rem, 10rem) 1fr auto;
+  gap: 0.35rem 0.65rem;
+  padding: 0.35rem 0.65rem;
+  border-bottom: 1px solid hsl(var(--border) / 0.35);
+  align-items: baseline;
+}
+
+.terra-log-row:last-child {
+  border-bottom: none;
+}
+
+.terra-log-ts {
+  color: hsl(var(--muted-foreground));
+  white-space: nowrap;
+}
+
+.terra-log-level {
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
+}
+
+.terra-log-row--debug .terra-log-level {
+  color: hsl(var(--muted-foreground));
+}
+
+.terra-log-row--info .terra-log-level {
+  color: hsl(var(--primary));
+}
+
+.terra-log-row--warning .terra-log-level {
+  color: hsl(38 92% 50%);
+}
+
+.terra-log-row--error .terra-log-level,
+.terra-log-row--critical .terra-log-level {
+  color: hsl(var(--destructive));
+}
+
+.terra-log-component {
+  color: hsl(192 55% 62%);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.terra-log-msg {
+  color: hsl(var(--foreground));
+  word-break: break-word;
+}
+
+.terra-log-http {
+  color: hsl(var(--muted-foreground));
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+
+.terra-log-detail {
+  grid-column: 1 / -1;
+  padding-left: 0.25rem;
+  color: hsl(var(--muted-foreground));
+  font-size: 0.7rem;
+}
+
+@media (max-width: 40rem) {
+  .terra-log-row {
+    grid-template-columns: 1fr;
+  }
+  .terra-log-http {
+    text-align: left;
+  }
+}

@@ -1,0 +1,127 @@
+/* Administration — SD-WAN managers (edge list + sync progress) */
+
+.terra-sdwan-edge-wrap {
+  max-width: 22rem;
+}
+
+.terra-sdwan-edge-summary {
+  cursor: pointer;
+  list-style: none;
+}
+
+.terra-sdwan-edge-summary::-webkit-details-marker {
+  display: none;
+}
+
+.terra-sdwan-edge-list {
+  margin: 0.35rem 0 0;
+  padding-left: 1.1rem;
+  max-height: 14rem;
+  overflow-y: auto;
+  font-size: 0.85rem;
+  line-height: 1.35;
+}
+
+.terra-sdwan-edge-list li {
+  margin-bottom: 0.15rem;
+}
+
+.terra-sdwan-edge-muted {
+  margin-top: 0.25rem;
+  font-size: 0.8rem;
+}
+
+/* Row highlight while per-cluster sync API call is in flight */
+@keyframes terra-sdwan-row-sync-pulse {
+  0%,
+  100% {
+    background-color: transparent;
+  }
+  50% {
+    background-color: rgb(128 128 128 / 0.14);
+  }
+}
+
+.terra-sdwan-row--syncing {
+  animation: terra-sdwan-row-sync-pulse 1.15s ease-in-out infinite;
+  box-shadow: inset 3px 0 0 0 rgb(128 128 128 / 0.45);
+}
+
+/* Sync now — inline progress under the manager row (no modal) */
+.terra-sdwan-sync-inline-row[hidden] {
+  display: none;
+}
+
+.terra-sdwan-sync-inline-cell {
+  padding: 0.75rem 1rem 0.9rem;
+  border-top: 1px solid hsl(var(--border) / 0.45);
+  background: hsl(var(--surface-container-low) / 0.85);
+  vertical-align: top;
+}
+
+.terra-sdwan-sync-inline-panel {
+  max-width: 40rem;
+}
+
+.terra-sdwan-sync-inline-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0.35rem 0.75rem;
+  margin-bottom: 0.5rem;
+}
+
+.terra-sdwan-sync-inline-title {
+  font-size: 0.95rem;
+  font-weight: 600;
+}
+
+.terra-sdwan-sync-inline-for {
+  font-size: 0.8rem;
+}
+
+.terra-sdwan-sync-inline-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 0.5rem;
+  margin-top: 0.35rem;
+}
+
+.terra-sdwan-sync-track {
+  height: 0.45rem;
+  border-radius: var(--md-sys-shape-corner-full);
+  background: hsl(var(--surface-container-highest));
+  overflow: hidden;
+  max-width: 28rem;
+}
+
+.terra-sdwan-sync-fill {
+  height: 100%;
+  width: 0%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, hsl(var(--brand-wave-b)), hsl(var(--brand-wave-a)));
+  transition: width 0.35s ease-out;
+}
+
+.terra-sdwan-sync-status {
+  margin: 0.65rem 0 0.15rem;
+  font-size: 0.875rem;
+  color: hsl(var(--foreground));
+  max-width: 40rem;
+}
+
+.terra-sdwan-sync-sub {
+  margin: 0 0 0.35rem;
+  font-size: 0.78rem;
+  color: hsl(var(--muted-foreground));
+  line-height: 1.35;
+  min-height: 1.8rem;
+  max-width: 40rem;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .terra-sdwan-sync-fill {
+    transition: none;
+  }
+}

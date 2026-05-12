@@ -18,7 +18,12 @@ def list_all_devices_for_ui(db: Session) -> list[tuple[SyncedDevice, str]]:
         select(SyncedDevice, User.email)
         .join(SdWanManagerInstance, SyncedDevice.sdwan_instance_id == SdWanManagerInstance.id)
         .join(User, SdWanManagerInstance.user_id == User.id)
-        .order_by(User.email.asc(), SyncedDevice.hostname.asc(), SyncedDevice.id.asc())
+        .order_by(
+            User.email.asc(),
+            SyncedDevice.sdwan_tenant_name.asc(),
+            SyncedDevice.hostname.asc(),
+            SyncedDevice.id.asc(),
+        )
     )
     return [(d, mail) for d, mail in db.execute(q).all()]
 
@@ -73,9 +78,17 @@ def device_to_home_row(db: Session, d: SyncedDevice, *, owner_email: str) -> dic
                 serial = deep_find_serial(raw)
         except json.JSONDecodeError:
             pass
+    tenant_cell = "—"
+    tn = (d.sdwan_tenant_name or "").strip()
+    tid = (d.sdwan_tenant_id or "").strip()
+    if tn:
+        tenant_cell = tn
+    elif tid:
+        tenant_cell = tid
     row: dict[str, Any] = {
         "id": d.id,
         "manager": mgr,
+        "tenant": tenant_cell,
         "hostname": d.hostname or "—",
         "serial_number": serial or "—",
         "model": d.model or "—",
