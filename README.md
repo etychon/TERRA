@@ -1,177 +1,283 @@
 # TERRA
 
-**T**elemetry for **E**dge and **R**emote **R**outable **A**ssets — a Cisco Catalyst SD-WAN–oriented operations dashboard for non-expert users.
+**T**elemetry for **E**dge and **R**emote **R**outable **A**ssets — a proof-of-concept operations dashboard built **on top of Cisco Catalyst SD-WAN Manager APIs**.
 
-## Run everything (Docker Compose)
+TERRA shows how partners and customers can assemble a **multi-cluster SD-WAN monitoring view** using Manager **dataservice** reads: inventory, live device telemetry, and cellular RF history. Configuration, policy, and templates stay in **Manager**; TERRA is for **monitor and report**, not for replacing the Manager WebUI or shipping as a production SaaS.
 
-From the **repository root** (Docker Desktop or Docker Engine with the Compose v2 plugin):
+**Who it is for:** operators who want a compact fleet picture across one or more Managers, and integrators evaluating API patterns. The API map TERRA uses today is documented in [`specs/sdwan-manager-api.md`](specs/sdwan-manager-api.md).
+
+---
+
+## Features
+
+### Sign-in and role-based access
+
+Dashboard-local users, sessions, and admin roles — day-to-day monitoring does not depend on end-user Manager WebUI accounts. Admins manage users at **`/admin/users`**.
+
+![TERRA sign-in page](docs/images/login.png)
+
+### Home map
+
+When Manager inventory includes latitude/longitude (or `geoLocation`), signed-in users see a **fleet map** with reachability-colored markers and links into device detail.
+
+![Home map with device markers](docs/images/home-map.png)
+
+### Devices across Managers
+
+A paginated **devices grid** (React + TanStack Table) lists WAN edges from every registered Manager: search, sort, column toggles, multi-page **compare**, and **Sync now** for on-demand inventory refresh. Multitenant Managers show a **Tenant** column.
+
+![Devices grid with cellular sparklines](docs/images/devices-grid.png)
+
+**API behind this:** inventory via `GET /dataservice/device` (and multitenant `tenant/switch` + `system/device/vedges`) — see [`specs/sdwan-manager-api.md`](specs/sdwan-manager-api.md).
+
+### Cellular at a glance
+
+Cellular-capable rows show a **Datatype sparkline** (last 24 hours of EIOLTE buckets, up to 20 points) and an **RSSI quality dot** (configurable dBm thresholds).
+
+### Device drill-down and live data
+
+Open a device for inventory fields, interface tables, and **Show live data** — on-demand polls of Manager **device realtime** APIs (`/dataservice/device/interface`, `/device/cellular/*`, etc.).
+
+![Device detail page](docs/images/device-detail.png)
+
+### Cellular RF history
+
+Historical RSRP/RSRQ/RSSI comes from Manager **EIOLTE statistics** (`POST /dataservice/statistics/eiolte/uniqueAggregation`), ingested into **VictoriaMetrics**, and charted on the device page (24h default, zoom/brush, metric toggles).
+
+![Cellular signal history chart](docs/images/cellular-history.png)
+
+Recipe reference: [cellular-signal-thresholds](https://github.com/etychon/Catalyst-SD-WAN-API-User-Receipe/blob/main/docs/recipes/cellular-signal-thresholds.md).
+
+### Register SD-WAN Managers
+
+Under **Administration → SD-WAN**, add each Manager base URL and credentials (session or JWT), **Verify** connectivity, and view **credential scope** (single-tenant vs multitenant provider/tenant token).
+
+![SD-WAN Manager administration](docs/images/sdwan-admin.png)
+
+### Background sync and optional Grafana
+
+- **`collector`** service — periodic inventory sync and cellular history ingest (VictoriaMetrics).
+- **`core`** service — Web UI and JSON API.
+- **Optional Grafana** — `docker compose --profile grafana up -d` (port **3000** by default) with a provisioned VictoriaMetrics datasource.
+
+Stack layout: [`specs/architecture.md`](specs/architecture.md) and [`docker-compose.yml`](docker-compose.yml).
+
+---
+
+## Prerequisites
+
+| Requirement | Notes |
+|-------------|--------|
+| **Linux host** (or AWS EC2) | Docker Engine + **Compose v2** (`docker compose`), Git |
+| **Network** | Outbound HTTPS from the host to your Manager URL(s) |
+| **SD-WAN Manager** | Base URL + API user (session or JWT) with inventory read access |
+| **Local Python/Node** | **Not** required for operators — Compose builds the app and devices grid |
+
+---
+
+## Quick start — Linux
+
+### 1. Clone the repository
+
+```bash
+git clone https://github.com/etychon/TERRA.git
+cd TERRA
+```
+
+### 2. Configure environment
+
+```bash
+cp .env.example .env
+```
+
+Edit `.env` and set at minimum:
+
+- `TERRA_SECRET_KEY` — at least 32 random characters
+- `TERRA_ADMIN_EMAIL` / `TERRA_ADMIN_PASSWORD` — bootstrap admin (first boot only)
+
+Optional: `TERRA_HTTPS_PORT` (default **4434**).
+
+### 3. Start the stack
 
 ```bash
 docker compose up --build -d
 ```
 
-Older Docker installs may use the same flags with the standalone binary: `docker-compose up --build -d`.
+Services: **`web`** (HTTPS edge), **`core`** (UI/API), **`collector`** (sync), **`postgres`**, **`victoriametrics`**.
 
-Then open **`https://localhost:4434`** (self-signed certificate on first run; your browser will warn until you accept the risk or replace certs — see `docker/certs/README.md`). **Liveness:** `GET /health` (e.g. `curl -sk https://localhost:4434/health`).
-
-### Debug diagnostics (Compose overlay, lab only)
-
-For **local inspection** (DB URL redacted, table row counts, SD-WAN manager rows without credentials, device samples), use the debug Compose overlay. It enables `TERRA_DEBUG_EXPOSE_INTERNALS` and publishes the **API** on the host at **`TERRA_DEBUG_API_PORT`** (default **`18434`** — avoids host **8000**). By default **`TERRA_DEBUG_HOST_BIND`** is **`0.0.0.0`**, so the debug API is reachable on the LAN as **`http://<host-ip>:18434`** (for example `http://192.168.2.3:18434`). Set **`TERRA_DEBUG_HOST_BIND=127.0.0.1`** to listen on loopback only. Container port remains **8000** inside the Docker network. Endpoints are gated by **`TERRA_DEBUG_TOKEN`** (`X-Terra-Debug-Token` header or `?debug_token=`).
-
-**Recommended (script sets port + token + default LAN bind):**
+### 4. Verify health
 
 ```bash
-./scripts/launch-terra-debug.sh
-export TERRA_DEBUG_TOKEN="$(cat .run/terra-debug.token)"   # optional: new shell / script did not export to your session
-curl -sS -H "X-Terra-Debug-Token: $TERRA_DEBUG_TOKEN" "http://127.0.0.1:${TERRA_DEBUG_API_PORT:-18434}/debug/summary"
-# Same host on LAN (example IP):
-curl -sS -H "X-Terra-Debug-Token: $TERRA_DEBUG_TOKEN" "http://192.168.2.3:${TERRA_DEBUG_API_PORT:-18434}/debug/summary"
+curl -sk https://localhost:4434/health
 ```
 
-The script also writes the same token to **`.run/terra-debug.token`** (mode `600`, gitignored) so tools can read it without `docker exec`.
+### 5. Sign in
 
-**Manual:**
+Open **`https://localhost:4434/auth/login`**. Accept the **self-signed** certificate warning on first visit (or install your own certs — see [`docker/certs/README.md`](docker/certs/README.md)).
 
-```bash
-export TERRA_DEBUG_TOKEN="$(openssl rand -hex 16)"
-export TERRA_DEBUG_API_PORT=18434
-export TERRA_DEBUG_HOST_BIND=0.0.0.0
-docker compose -f docker-compose.yml -f docker-compose.debug.yml up --build -d --remove-orphans
-curl -sS -H "X-Terra-Debug-Token: $TERRA_DEBUG_TOKEN" "http://127.0.0.1:${TERRA_DEBUG_API_PORT}/debug/summary"
-```
-
-**Lab only:** LAN binding exposes `/debug/*` to every device that can route to that port. Protection is the shared token plus your network boundary — do not use this overlay on production-facing hosts.
-
-### Default admin credentials (first sign-in)
-
-Unless you set overrides in `.env` **before the first database seed**, the bootstrap superuser is:
+Unless you changed `.env` before the first database seed, the bootstrap admin is:
 
 | | Value |
 |---|--------|
-| **Sign-in URL** | `https://localhost:4434/auth/login` |
-| **User admin (after sign-in, admin role)** | `https://localhost:4434/admin/users` |
 | **Email** | `admin@terra.local` |
 | **Password** | `ChangeMe!Admin-1st-login` |
 
-These match `TERRA_ADMIN_EMAIL` and `TERRA_ADMIN_PASSWORD` in `docker-compose.yml` / `.env.example`. Change them for any shared or non-local environment; the seed step only creates this user when the database has no matching admin yet.
+Change these for any shared or non-local deployment.
 
-- **TLS material:** `docker/certs/` is bind-mounted into the `web` container. If `server.crt` and `server.key` are absent, a **dev self-signed** pair is generated on first start. For production or corporate PKI, place your own PEM files there (same names) before starting Compose.
-- **Stop:** `docker compose down` (add `-v` to remove named volumes for Postgres and VictoriaMetrics).
-- **Follow logs:** `docker compose logs -f web` and/or `docker compose logs -f core` and/or `docker compose logs -f collector`.
-- **Different HTTPS host port:** set `TERRA_HTTPS_PORT` in `.env` (default **4434** avoids common conflicts with **8000**).
+### 6. Connect your SD-WAN Manager
 
-The dashboard **React SPA** is still evolving under `frontend/` (tokens and lint today). Compose runs **`core`** (FastAPI UI/API), **`collector`** (periodic SD-WAN inventory sync + sparse metrics push), **`postgres`** (relational data), **`victoriametrics`** (time series, default **30d** retention), and **`web`** (TLS). **Contributors** may still use local `pip` / `npm`; **operators and agents** default to Compose — see `LLM_CONTEXT.md` and `AGENTS.md`.
+1. Go to **Administration → SD-WAN** (`/administration/sd-wan`).
+2. Add **display name**, **Manager base URL**, and credentials.
+3. Click **Verify** — fix auth or network issues until status is linked.
+4. Open **Devices** and click **Sync now** (or wait for the background collector).
 
-**Optional Grafana:** `docker compose --profile grafana up -d` starts Grafana on port **3000** (override with `TERRA_GRAFANA_PORT`) with a datasource wired to VictoriaMetrics.
+See [Connect your SD-WAN environment](#connect-your-sd-wan-environment) below for auth modes and multitenant notes.
 
-**Postgres password:** default dev password is in `docker-compose.yml` (override `TERRA_POSTGRES_PASSWORD` and matching `TERRA_DATABASE_URL` for production). See `.env.example`.
+### 7. Stop or reset
 
-## Goals (summary)
+```bash
+docker compose down          # stop containers, keep data volumes
+docker compose down -v       # also remove Postgres + VictoriaMetrics volumes
+```
 
-- Monitor **multiple** SD-WAN environments from one place using **Cisco Catalyst SD-WAN Manager APIs** (configuration stays in Manager).
-- Present a **compact, high-level** view of cEdge health: IOS-XE version (with **out-of-date** highlighting), CPU, memory, link usage, cellular quality, disk, IOx app status, GPS history, alerts/events, and related reporting.
-- First-class **authentication and user management** in the dashboard (not delegated to SD-WAN WebUI for day-to-day monitoring).
-- Design for a future **Cisco Catalyst Center** connector without locking the core model to Manager-only assumptions.
+**Follow logs:** `docker compose logs -f web core collector`
 
-## Repository layout
+<details>
+<summary>Lab diagnostics only (debug overlay)</summary>
+
+For local inspection (`/debug/summary`, redacted DB/Manager samples), use [`scripts/launch-terra-debug.sh`](scripts/launch-terra-debug.sh) or `docker-compose.debug.yml`. **Do not** expose this overlay on production-facing hosts. See comments in [`.env.example`](.env.example).
+
+</details>
+
+---
+
+## Deploy on AWS (EC2)
+
+This PoC runs the same **Docker Compose** stack on a single EC2 instance. There is no Terraform/CloudFormation in the repo today.
+
+### 1. Launch an instance
+
+- **AMI:** Amazon Linux 2023 or Ubuntu 22.04 LTS
+- **Size:** `t3.small` or larger (build + sync are CPU/network heavy)
+- **Architecture:** **x86_64** or **arm64** (images are multi-arch)
+
+### 2. Security group
+
+Allow inbound only from trusted sources:
+
+| Port | Purpose |
+|------|---------|
+| **4434/tcp** | TERRA HTTPS UI (`TERRA_HTTPS_PORT`) |
+| **22/tcp** | SSH administration |
+
+Avoid `0.0.0.0/0` on SSH; restrict **4434** to your office/VPN CIDR where possible.
+
+### 3. Install Docker
+
+On **Amazon Linux 2023** (example):
+
+```bash
+sudo dnf update -y
+sudo dnf install -y docker git
+sudo systemctl enable --now docker
+sudo usermod -aG docker "$USER"
+# log out and back in, then:
+docker compose version
+```
+
+If the Compose plugin is missing, follow [Docker Engine install docs](https://docs.docker.com/engine/install/) for your distro.
+
+### 4. Clone and configure
+
+```bash
+git clone https://github.com/etychon/TERRA.git
+cd TERRA
+cp .env.example .env
+```
+
+Set strong `TERRA_SECRET_KEY`, `TERRA_ADMIN_EMAIL`, and `TERRA_ADMIN_PASSWORD` in `.env`.
+
+### 5. Start TERRA
+
+```bash
+docker compose up --build -d
+curl -sk https://127.0.0.1:4434/health
+```
+
+### 6. Open the UI
+
+Browse to **`https://<instance-public-ip>:4434`**, accept the self-signed cert (or place real PEMs in [`docker/certs/`](docker/certs/) before start).
+
+### 7. Persistence
+
+Compose volumes **`terra_pg`** (inventory, users) and **`terra_vm`** (metrics) live on the instance EBS root (or attached volume). Back up before `docker compose down -v`.
+
+### 8. Production caveats
+
+This repository is a **PoC sample**: replace self-signed TLS, rotate secrets, narrow security groups, use strong passwords, and **do not** enable the debug overlay on the public Internet. For TLS at scale, you can terminate HTTPS with **ACM + ALB** in front of the instance (high level only — not documented step-by-step here).
+
+---
+
+## Connect your SD-WAN environment
+
+| Topic | Guidance |
+|-------|----------|
+| **API surface** | [`specs/sdwan-manager-api.md`](specs/sdwan-manager-api.md) — every Manager path TERRA calls |
+| **Session auth** | Form login to `/j_security_check`; CSRF token from `/dataservice/client/token` |
+| **JWT auth** | Bearer token; refresh `X-XSRF-TOKEN` from `/dataservice/client/server` before statistics POSTs |
+| **Multitenant** | Tenant list + `POST /dataservice/tenant/{id}/switch`; credential scope badge on admin table — [`specs/integrations.md`](specs/integrations.md) |
+| **Cellular history** | Requires successful sync, `TERRA_CELLULAR_HISTORY_ENABLED`, and VictoriaMetrics; see [`.env.example`](.env.example) |
+
+Integrator cookbook (external): [Catalyst SD-WAN API User Recipe](https://github.com/etychon/Catalyst-SD-WAN-API-User-Receipe).
+
+---
+
+## Configuration reference
+
+Full list: [`.env.example`](.env.example). Common operator variables:
+
+| Variable | Default (Compose) | Purpose |
+|----------|-------------------|---------|
+| `TERRA_HTTPS_PORT` | `4434` | Host port for HTTPS UI |
+| `TERRA_ADMIN_EMAIL` / `TERRA_ADMIN_PASSWORD` | see compose | Bootstrap admin (first seed) |
+| `TERRA_SECRET_KEY` | dev placeholder | Session/crypto secret — **change in production** |
+| `TERRA_POSTGRES_PASSWORD` | dev placeholder | Postgres password |
+| `TERRA_SDWAN_BACKGROUND_SYNC` | `false` on core, `true` on collector | Periodic inventory sync |
+| `TERRA_CELLULAR_HISTORY_ENABLED` | `true` | EIOLTE → VictoriaMetrics ingest |
+| `TERRA_GRAFANA_PORT` | `3000` | Optional Grafana profile |
+
+---
+
+## For contributors
+
+| Resource | Purpose |
+|----------|---------|
+| [`AGENTS.md`](AGENTS.md) | Agent/PR conventions, CI, spec discipline |
+| [`LLM_CONTEXT.md`](LLM_CONTEXT.md) | Dense product + integration context |
+| [`specs/`](specs/) | Canonical product and architecture decisions |
+| [`docs/`](docs/) | Extra human docs and README screenshots |
+
+**Local tooling** (optional — Compose remains the default run path):
+
+```bash
+python -m venv .venv && source .venv/bin/activate
+pip install -e ".[dev]"
+pytest
+npm install && npm run lint && npm run build:devices-grid
+```
+
+**Re-capture README screenshots:** `TERRA_SCREENSHOT_BASE_URL=https://localhost:4434 node scripts/capture-readme-screenshots.mjs` — see [`docs/images/README.md`](docs/images/README.md).
 
 | Path | Purpose |
 |------|---------|
-| `src/terra_sdwan/` | SD-WAN Manager HTTP/sync/live reads (shared by **core** and **collector**). |
-| `src/terra/` | FastAPI **`core`** app: session auth, RBAC, user admin API, Cisco-themed auth pages. |
-| `tests/` | Unit, integration, and smoke tests. |
-| `data/` | Local datasets, fixtures, and cached samples (no secrets). |
-| `notebooks/` | Exploratory analysis and prototyping. |
-| `models/` | Serialized models or schema artifacts if/when needed. |
-| `docs/` | Human-facing documentation beyond the README. |
-| `specs/` | Short, authoritative product and engineering specs. |
-| `package.json` (root) | Proxies `npm run lint` / `npm run typecheck` to `frontend/` so you can run them from the repo root. |
-| `docker-compose.yml`, `docker-compose.debug.yml`, `Dockerfile` | **Canonical** full-stack bootstrap; optional **debug** overlay for `/debug/*` (default bind **0.0.0.0:18434** on the host). |
-| `scripts/launch-terra-debug.sh` | One-shot **debug Compose** (API on **18434**, not **8000**; LAN-reachable unless `TERRA_DEBUG_HOST_BIND=127.0.0.1`; writes `.run/terra-debug.token`). |
-| `docker/web/` | **HTTPS edge** (nginx TLS on **4434** → **`core`**). |
-| `docker/certs/` | TLS PEMs (`server.crt`, `server.key`); optional bind mount for **externally issued** certs. |
-| `frontend/` | Dashboard UI: Tailwind + shadcn-style CSS variables, token layers, ESLint design guardrails. |
-| `.cursor/skills/terra-ui-design-system/` | Cursor **SKILL** for UI work (loads design-system rules). |
-| `LLM_CONTEXT.md` | **LLM-oriented** project context (not a substitute for `specs/`). |
+| `src/terra/` | FastAPI **core** — auth, UI, APIs |
+| `src/terra_sdwan/` | SD-WAN Manager connector (sync, live, cellular history) |
+| `frontend/src/devices/` | Devices grid React island → `static/dist/devices-grid.js` |
+| `tests/` | pytest suite |
+| `e2e/` | Playwright smoke tests |
 
-## Prerequisites
-
-- **Docker** with the **Compose v2** plugin (`docker compose`), for the default run path above.
-- Python **3.11+** (local tooling, tests, `pip install -e ".[dev]"`).
-- **Node.js 18+** and **npm** (dashboard design-system package; **20 LTS** recommended to match `frontend/.nvmrc`).
-
-## Install (development tooling)
-
-```bash
-python -m venv .venv
-source .venv/bin/activate
-pip install -e ".[dev]"
-```
-
-### Optional: Git hooks (Ruff)
-
-```bash
-pip install pre-commit
-pre-commit install
-```
-
-On a brand-new clone, `pre-commit` runs against tracked files; after the first `git add` / commit, hooks behave as usual.
-
-## Run tests
-
-```bash
-pytest
-```
-
-Smoke checks live under `tests/` and validate that the repository and expected entry-point files remain coherent as the tree evolves.
-
-## Lint and type check
-
-```bash
-ruff check src/terra src/terra_sdwan tests
-mypy src/terra src/terra_sdwan tests
-```
-
-## Frontend (design system + guardrails)
-
-This repo uses **npm workspaces** (`frontend/` is a workspace). From the **repo root**:
-
-```bash
-npm install
-npm run build:devices-grid   # required for /devices when not using Docker Compose
-npm run lint
-npm run test:frontend
-```
-
-(`npm run lint` runs `tsc`, ESLint, and the design contract script on the workspace package. Use `npm run typecheck` only if you want TypeScript alone. The devices grid bundle is built into `src/terra/static/dist/`; Compose and the `Dockerfile` run this step automatically.)
-
-Authoritative UI rules: `specs/design-system.md`. TypeScript tokens live in `frontend/src/tokens/` (`primitives.ts` → `semantic.ts` → `components.ts`); theme colors are **CSS custom properties** in `frontend/src/styles/globals.css` (`:root` / `.dark`).
-
-## Backend (authentication and RBAC)
-
-The FastAPI app lives under `src/terra`. **Prefer running via Docker Compose** (above). For **local Python development** after `pip install -e ".[dev]"`:
-
-```bash
-terra-serve
-# or: uvicorn terra.main:app --reload --host 127.0.0.1 --port 8000
-```
-
-The periodic SD-WAN inventory loop is **`terra-collector`** (`python -m terra.collector` or the `terra-collector` console script) when you want parity with Compose without running the full stack; it respects `TERRA_SDWAN_BACKGROUND_SYNC` (defaults **true** unless your `.env` sets it false, as in `tests/conftest.py`).
-
-- **Web UI:** `/auth/login` (Cisco-aligned dark theme via `src/terra/static/css/terra-auth.css`), `/` when signed in.
-- **JSON API:** `/api/v1/auth/*` (login, logout, forgot/reset, verify, `me`) and `/api/v1/admin/users*` for admin CRUD, roles, and bulk updates (public **register** is disabled; admins create users).
-- **Admin Web UI:** signed-in users with the **admin** role can open **`/admin/users`** to add/remove users, reset passwords, and assign roles (same capabilities as the admin JSON API).
-- **Bootstrap admin:** see **Default admin credentials** above when using Compose; for custom seeds set `TERRA_ADMIN_EMAIL` / `TERRA_ADMIN_PASSWORD` before first boot.
-- **Configuration:** set `TERRA_SECRET_KEY` (≥32 characters), `TERRA_DATABASE_URL` (default `sqlite:///./data/terra.db`). With `TERRA_MAIL_MODE=log` (default), password-reset and email-verification tokens are written to logs instead of SMTP.
-- **Plain HTTP local dev:** keep `TERRA_SESSION_COOKIE_SECURE=false` (default when not using Compose) so session cookies work over `http://127.0.0.1:8000`; Compose sets it to **true** behind the HTTPS edge.
-
-## Agent and automation entry points
-
-- **`AGENTS.md`** — concise guidance for coding agents (workflows, PR expectations, spec discipline).
-- **`LLM_CONTEXT.md`** — dense machine-oriented context for models assisting on this repo.
-- **`.cursor/skills/terra-ui-design-system/SKILL.md`** — agent skill for dashboard UI (Cisco-aligned tokens, Tailwind + shadcn variable pattern, ESLint/pre-commit guardrails).
-- **Slash `/commit`** — verifies tests/lint, summarizes changes since `HEAD`, and guides a public-safe `git commit` (see `.cursor/commands/commit.md`).
+---
 
 ## License
 
-This sample is distributed under the **Cisco Sample Code License, Version 1.1**; see `LICENSE`.
+This sample is distributed under the **Cisco Sample Code License, Version 1.1**; see [`LICENSE`](LICENSE).

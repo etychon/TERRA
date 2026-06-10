@@ -1,9 +1,12 @@
 # docs/
 
-Human-oriented documentation will accumulate here (runbooks, screenshots policy, onboarding).
+Human-oriented documentation for TERRA operators and integrators.
 
-Until then, start with:
+| Location | Contents |
+|----------|----------|
+| [`../README.md`](../README.md) | **Start here** — PoC overview, features, Linux/AWS bring-up |
+| [`images/`](images/) | Screenshots embedded in the README |
+| [`../specs/`](../specs/) | Engineering and product specs (API map, integrations, design system) |
+| [`../AGENTS.md`](../AGENTS.md) | Contributor and automation conventions |
 
-1. `../README.md`
-2. `../specs/` for authoritative engineering and product decisions
-3. `../AGENTS.md` for automation/agent conventions
+Runbooks and deeper onboarding notes can accumulate in this folder over time.
