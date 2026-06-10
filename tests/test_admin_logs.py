@@ -56,7 +56,7 @@ def test_async_sdwan_sync_job_completes(client: TestClient, monkeypatch: pytest.
             progress_notify("saving", 88, "unit test")
         return (3, None)
 
-    monkeypatch.setattr("terra.sdwan_sync_job_runner.sync_devices_for_instance", fast_sync)
+    monkeypatch.setattr("terra_sdwan.sdwan_sync_job_runner.sync_devices_for_instance", fast_sync)
 
     email = os.environ["TERRA_ADMIN_EMAIL"]
     password = os.environ["TERRA_ADMIN_PASSWORD"]
@@ -112,7 +112,7 @@ def test_sync_sdwan_job_cancel_not_found(client: TestClient) -> None:
 
 
 def test_async_sdwan_sync_job_cancelled(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
-    from terra.sdwan_sync import SdWanSyncCancelled
+    from terra_sdwan.sdwan_sync import SdWanSyncCancelled
 
     def cooperative_sync(
         _db: Any,
@@ -127,7 +127,7 @@ def test_async_sdwan_sync_job_cancelled(client: TestClient, monkeypatch: pytest.
             time.sleep(0.0005)
         return (1, None)
 
-    monkeypatch.setattr("terra.sdwan_sync_job_runner.sync_devices_for_instance", cooperative_sync)
+    monkeypatch.setattr("terra_sdwan.sdwan_sync_job_runner.sync_devices_for_instance", cooperative_sync)
 
     email = os.environ["TERRA_ADMIN_EMAIL"]
     password = os.environ["TERRA_ADMIN_PASSWORD"]

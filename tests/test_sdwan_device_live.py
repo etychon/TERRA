@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import httpx
 
-from terra.sdwan_device_live import (
+from terra_sdwan.sdwan_device_live import (
     fetch_live_device_dashboard,
     interface_row_from_live_api_dict,
     vmanage_device_id_candidates,

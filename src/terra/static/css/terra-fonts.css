@@ -44,3 +44,13 @@
   font-display: swap;
   src: url("/static/fonts/roboto-mono-v31-latin-500.ttf") format("truetype");
 }
+
+/* Datatype — inline sparklines in devices grid (SIL Open Font License 1.1). */
+@font-face {
+  font-family: Datatype;
+  font-style: normal;
+  font-weight: 100 900;
+  font-stretch: 0% 100%;
+  font-display: swap;
+  src: url("/static/fonts/Datatype-wdth-wght.woff2") format("woff2");
+}

@@ -18,7 +18,7 @@ export default tseslint.config(
   eslint.configs.recommended,
   ...tseslint.configs.recommended,
   {
-    files: ["src/**/*.ts"],
+    files: ["src/**/*.{ts,tsx}"],
     plugins: {
       "terra-design": terraDesign,
     },

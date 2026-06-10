@@ -77,6 +77,7 @@ def debug_summary(
             "sdwan_sync_interval_seconds": s.sdwan_sync_interval_seconds,
             "sdwan_sync_startup_delay_seconds": s.sdwan_sync_startup_delay_seconds,
             "sdwan_sync_inventory_timeout_seconds": s.sdwan_sync_inventory_timeout_seconds,
+            "sdwan_sync_enrich_concurrency": s.sdwan_sync_enrich_concurrency,
             "sdwan_batch_max_concurrent_managers": s.sdwan_batch_max_concurrent_managers,
             "admin_email": s.admin_email,
         },

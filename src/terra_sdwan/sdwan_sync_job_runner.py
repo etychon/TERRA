@@ -14,7 +14,7 @@ from terra.crud_sdwan import get_sdwan_manager
 from terra.db import get_session_factory
 from terra.inventory_extract import utc_iso_for_json
 from terra.models import SdWanLinkStatus
-from terra.sdwan_sync import SdWanSyncCancelled, sync_devices_for_instance
+from terra_sdwan.sdwan_sync import SdWanSyncCancelled, sync_devices_for_instance
 
 _jobs_lock = threading.Lock()
 _jobs: dict[str, dict[str, Any]] = {}

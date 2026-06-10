@@ -16,8 +16,13 @@
 
 ## Reporting
 
-- **GPS history:** sample every few minutes where device/API allows; retain roughly **one day** of rolling history for operational map playback (exact retention in implementation spec later).
-- **Events / alerts:** must be explainable in plain language for non-experts.
+- **GPS / location history:** prefer **Cisco Manager** historical or streaming APIs where the deployment exposes them and licensing allows — authoritative for “what Manager saw.” For **OT map playback** and **~30-day** stretches when Manager retention is shorter or unavailable, store **normalized samples** in VictoriaMetrics (minutes-level cadence; see [`specs/telemetry-storage.md`](telemetry-storage.md)).
+- **Events / alerts:** must be explainable in plain language for non-experts; syslog and alarm feeds remain **connector-owned** until paths are listed in [`specs/sdwan-manager-api.md`](sdwan-manager-api.md).
+
+## Personas (monitoring product)
+
+- **OT operators:** need **simple, customizable** workflows (inventory health, cellular, site topology) without full Manager navigation — supported by dashboard projections and future **saved OT views** (configuration TBD in Postgres).
+- **IT / NOC operators:** need a **single pane** across **many clusters** and headroom toward **20k+ devices** — requires Postgres + **`collector`** scale-out story in [`specs/architecture.md`](architecture.md), not SQLite-only defaults.
 
 ## Device inventory (UI)
 

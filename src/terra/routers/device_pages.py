@@ -15,14 +15,13 @@ from sqlalchemy.orm import Session
 from terra.config import get_settings
 from terra.crud import user_to_public
 from terra.crud_devices import (
-    device_to_home_row,
     get_device_for_user,
     get_devices_for_user_by_ids,
-    list_all_devices_for_ui,
 )
 from terra.db import get_db
 from terra.deps import ensure_csrf, get_current_user, user_is_admin
 from terra.inventory_extract import (
+    device_has_cellular_capability,
     display_serial,
     extract_cellular_kv,
     extract_interface_rows,
@@ -87,10 +86,7 @@ def devices_inventory(
     db: Annotated[Session, Depends(get_db)],
     user: Annotated[User, Depends(get_current_user)],
 ) -> HTMLResponse:
-    """Full-fabric device grid (Material / Tabulator); same inventory as former Home table."""
-    pairs = list_all_devices_for_ui(db)
-    devices_payload = [device_to_home_row(db, d, owner_email=owner) for d, owner in pairs]
-    devices_json = json.dumps(devices_payload, separators=(",", ":")).replace("<", "\\u003c")
+    """Full-fabric device grid (React island + paginated API)."""
     return templates.TemplateResponse(
         request,
         "devices.html",
@@ -102,7 +98,6 @@ def devices_inventory(
             "nav_is_admin": user_is_admin(user),
             "nav_active": "devices",
             "show_device_owner": True,
-            "devices_json": devices_json,
         },
     )
 
@@ -241,6 +236,7 @@ def device_detail(
         parsed = {}
     manager_field_groups = _manager_field_groups_from_parsed(parsed)
     cellular_kv = extract_cellular_kv(parsed)
+    has_cellular = device_has_cellular_capability(parsed, model=row.model, hostname=row.hostname)
     serial_display = display_serial(row.serial_number, parsed)
     # Interfaces and cellular hints come from last synced inventory only (background sync),
     # not blocking Manager dataservice calls on page load.
@@ -268,6 +264,7 @@ def device_detail(
             "interface_rows_primary": interface_rows_primary,
             "interface_rows_deferred": interface_rows_deferred,
             "cellular_kv": cellular_kv,
+            "has_cellular": has_cellular,
             "manager_field_groups": manager_field_groups,
             "pretty_json": json.dumps(parsed, indent=2, sort_keys=True, default=str)[:120000],
             "device_live_poll_interval_ms": max(3000, settings.device_live_poll_interval_seconds * 1000),

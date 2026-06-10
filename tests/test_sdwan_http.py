@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import httpx
 
-from terra.sdwan_http import refresh_sdwan_dataservice_csrf_header
+from terra_sdwan.sdwan_http import refresh_sdwan_dataservice_csrf_header
 
 
 def test_refresh_sdwan_dataservice_csrf_parses_dict_data() -> None:

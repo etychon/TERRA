@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import httpx
 
-from terra.sdwan_credential_scope import (
+from terra_sdwan.sdwan_credential_scope import (
     credential_scope_public_label,
     detect_credential_scope,
 )

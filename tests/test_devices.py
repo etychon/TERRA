@@ -76,9 +76,8 @@ def test_devices_inventory_page(client: TestClient) -> None:
     _login(client)
     r = client.get("/devices")
     assert r.status_code == 200
-    assert "terra-devices-json" in r.text
-    assert "terra-devices-columns-btn" in r.text
-    assert "terra-devices-control-plane-btn" in r.text
+    assert "terra-devices-grid-root" in r.text
+    assert "/static/dist/devices-grid.js" in r.text
     assert "Devices across SD-WAN managers" in r.text
     assert "terra-sidebar-link" in r.text and "Devices" in r.text
 
@@ -89,6 +88,8 @@ def test_sync_api_returns_stats(client: TestClient, monkeypatch: pytest.MonkeyPa
     @contextmanager
     def fake_open(secret_key: str, inst: SdWanManagerInstance) -> Iterator[Any]:
         class C:
+            headers = httpx.Headers({})
+
             def get(self, url: str, *_a: Any, **_k: Any) -> httpx.Response:
                 u = str(url)
                 if "/dataservice/tenant" in u and "switch" not in u:
@@ -117,7 +118,7 @@ def test_sync_api_returns_stats(client: TestClient, monkeypatch: pytest.MonkeyPa
 
         yield C()
 
-    monkeypatch.setattr("terra.sdwan_sync.open_manager_http_client", fake_open)
+    monkeypatch.setattr("terra_sdwan.sdwan_sync.open_manager_http_client", fake_open)
 
     sf = get_session_factory()
     with sf() as db:

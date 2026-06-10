@@ -1,9 +1,36 @@
 # Canonical local / demo bootstrap — see README.md and LLM_CONTEXT.md.
 # Single command: docker compose up --build -d
 #
-# User-facing WebUI: HTTPS on host port 4434 (TLS at `web` → `api` on :8000 inside the network).
+# User-facing WebUI: HTTPS on host port 4434 (TLS at `web` → `core` on :8000 inside the network).
+# `collector` runs periodic SD-WAN inventory sync; `core` serves the FastAPI UI/API.
 services:
-  api:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: ${TERRA_POSTGRES_USER:-terra}
+      POSTGRES_PASSWORD: ${TERRA_POSTGRES_PASSWORD:-terradb-dev-password}
+      POSTGRES_DB: ${TERRA_POSTGRES_DB:-terra}
+    volumes:
+      - terra_pg:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${TERRA_POSTGRES_USER:-terra} -d ${TERRA_POSTGRES_DB:-terra}"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 15s
+
+  victoriametrics:
+    image: victoriametrics/victoria-metrics:v1.106.0
+    command:
+      - "-storageDataPath=/vmdata"
+      - "-retentionPeriod=30d"
+      - "-httpListenAddr=:8428"
+    volumes:
+      - terra_vm:/vmdata
+    expose:
+      - "8428"
+
+  core:
     build:
       context: .
       dockerfile: Dockerfile
@@ -14,18 +41,54 @@ services:
       TERRA_SECRET_KEY: ${TERRA_SECRET_KEY:-compose-default-dev-secret-32chars!!}
       TERRA_ADMIN_EMAIL: ${TERRA_ADMIN_EMAIL:-admin@terra.local}
       TERRA_ADMIN_PASSWORD: ${TERRA_ADMIN_PASSWORD:-ChangeMe!Admin-1st-login}
-      TERRA_DATABASE_URL: sqlite:////data/terra.db
+      TERRA_DATABASE_URL: postgresql+psycopg://${TERRA_POSTGRES_USER:-terra}:${TERRA_POSTGRES_PASSWORD:-terradb-dev-password}@postgres:5432/${TERRA_POSTGRES_DB:-terra}
       TERRA_MAIL_MODE: ${TERRA_MAIL_MODE:-log}
       TERRA_SESSION_COOKIE_SECURE: ${TERRA_SESSION_COOKIE_SECURE:-true}
       TERRA_FORWARDED_ALLOW_IPS: ${TERRA_FORWARDED_ALLOW_IPS:-*}
-    volumes:
-      - terra_sqlite:/data
+      TERRA_SDWAN_BACKGROUND_SYNC: "false"
+      TERRA_VICTORIAMETRICS_URL: http://victoriametrics:8428
+      TERRA_TELEMETRY_PUSH_ENABLED: ${TERRA_TELEMETRY_PUSH_ENABLED:-true}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      victoriametrics:
+        condition: service_started
     healthcheck:
       test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8000/health"]
       interval: 15s
       timeout: 5s
       retries: 5
-      start_period: 20s
+      start_period: 25s
+
+  collector:
+    build:
+      context: .
+      dockerfile: docker/collector/Dockerfile
+    image: terra-sdwan-dashboard-collector:local
+    environment:
+      TERRA_SECRET_KEY: ${TERRA_SECRET_KEY:-compose-default-dev-secret-32chars!!}
+      TERRA_ADMIN_EMAIL: ${TERRA_ADMIN_EMAIL:-admin@terra.local}
+      TERRA_ADMIN_PASSWORD: ${TERRA_ADMIN_PASSWORD:-ChangeMe!Admin-1st-login}
+      TERRA_DATABASE_URL: postgresql+psycopg://${TERRA_POSTGRES_USER:-terra}:${TERRA_POSTGRES_PASSWORD:-terradb-dev-password}@postgres:5432/${TERRA_POSTGRES_DB:-terra}
+      TERRA_MAIL_MODE: ${TERRA_MAIL_MODE:-log}
+      TERRA_SDWAN_BACKGROUND_SYNC: "true"
+      TERRA_VICTORIAMETRICS_URL: http://victoriametrics:8428
+      TERRA_TELEMETRY_PUSH_ENABLED: ${TERRA_TELEMETRY_PUSH_ENABLED:-true}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      victoriametrics:
+        condition: service_started
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "python -c \"from terra.config import get_settings; from sqlalchemy import create_engine, text; e=create_engine(get_settings().database_url); c=e.connect(); c.execute(text('SELECT 1')); c.close()\"",
+        ]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
 
   web:
     build:
@@ -37,7 +100,7 @@ services:
     volumes:
       - ./docker/certs:/etc/nginx/certs
     depends_on:
-      api:
+      core:
         condition: service_healthy
     healthcheck:
       test: ["CMD", "curl", "-fk", "https://127.0.0.1/health"]
@@ -46,5 +109,22 @@ services:
       retries: 5
       start_period: 25s
 
+  grafana:
+    image: grafana/grafana:11.4.0
+    profiles:
+      - grafana
+    environment:
+      GF_SECURITY_ADMIN_USER: ${TERRA_GRAFANA_ADMIN_USER:-admin}
+      GF_SECURITY_ADMIN_PASSWORD: ${TERRA_GRAFANA_ADMIN_PASSWORD:-admin}
+      GF_USERS_DEFAULT_THEME: dark
+    volumes:
+      - ./docker/grafana/provisioning:/etc/grafana/provisioning:ro
+    ports:
+      - "${TERRA_GRAFANA_PORT:-3000}:3000"
+    depends_on:
+      victoriametrics:
+        condition: service_started
+
 volumes:
-  terra_sqlite: {}
+  terra_pg: {}
+  terra_vm: {}

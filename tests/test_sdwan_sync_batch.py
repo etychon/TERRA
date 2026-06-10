@@ -13,8 +13,8 @@ from sqlalchemy.orm import Session
 
 from terra.db import get_session_factory, init_db
 from terra.models import SdWanManagerInstance, SyncedDevice, User
-from terra.sdwan_sync import sync_all_connected_managers, sync_user_sdwan_devices
 from terra.secret_store import encrypt_json
+from terra_sdwan.sdwan_sync import sync_all_connected_managers, sync_user_sdwan_devices
 
 
 @pytest.fixture(autouse=True)
@@ -45,7 +45,7 @@ def test_sync_all_batch_logs_run_id_and_survives_one_crash(monkeypatch: pytest.M
     ) -> None:
         captured.append((level, component, message, detail))
 
-    monkeypatch.setattr("terra.sdwan_sync.append_event", fake_append)
+    monkeypatch.setattr("terra_sdwan.sdwan_sync.append_event", fake_append)
 
     def fake_sync(
         db: Session,
@@ -58,7 +58,7 @@ def test_sync_all_batch_logs_run_id_and_survives_one_crash(monkeypatch: pytest.M
             raise RuntimeError("intentional worker failure")
         return (3, None)
 
-    monkeypatch.setattr("terra.sdwan_sync.sync_devices_for_instance", fake_sync)
+    monkeypatch.setattr("terra_sdwan.sdwan_sync.sync_devices_for_instance", fake_sync)
 
     sf = get_session_factory()
     sk = os.environ["TERRA_SECRET_KEY"]
@@ -117,7 +117,7 @@ def test_sync_user_bulk_uses_batch_component(monkeypatch: pytest.MonkeyPatch) ->
         if component == "sdwan_sync_batch":
             captured.append(detail)
 
-    monkeypatch.setattr("terra.sdwan_sync.append_event", fake_append)
+    monkeypatch.setattr("terra_sdwan.sdwan_sync.append_event", fake_append)
 
     def fake_sync(
         db: Session,
@@ -128,7 +128,7 @@ def test_sync_user_bulk_uses_batch_component(monkeypatch: pytest.MonkeyPatch) ->
     ) -> tuple[int, str | None]:
         return (1, None)
 
-    monkeypatch.setattr("terra.sdwan_sync.sync_devices_for_instance", fake_sync)
+    monkeypatch.setattr("terra_sdwan.sdwan_sync.sync_devices_for_instance", fake_sync)
 
     sf = get_session_factory()
     sk = os.environ["TERRA_SECRET_KEY"]

@@ -6,8 +6,8 @@ from dataclasses import dataclass
 
 import httpx
 
-from terra.sdwan_http import refresh_sdwan_dataservice_csrf_header
-from terra.sdwan_sync import (
+from terra_sdwan.sdwan_http import refresh_sdwan_dataservice_csrf_header
+from terra_sdwan.sdwan_sync import (
     _tenant_switch_id,
     fetch_device_inventory,
     fetch_tenant_list,

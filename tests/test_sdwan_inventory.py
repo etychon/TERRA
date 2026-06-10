@@ -4,9 +4,9 @@ from __future__ import annotations
 
 import httpx
 
-from terra.sdwan_client import _manager_version_from_server_json
-from terra.sdwan_dataservice_rows import rows_from_dataservice_body
-from terra.sdwan_sync import (
+from terra_sdwan.sdwan_client import _manager_version_from_server_json
+from terra_sdwan.sdwan_dataservice_rows import rows_from_dataservice_body
+from terra_sdwan.sdwan_sync import (
     _gather_inventory_with_tenant_scopes,
     fetch_device_inventory,
     fetch_tenant_list,
@@ -164,6 +164,53 @@ def test_gather_inventory_multitenant_device_singleton_dict() -> None:
     assert rows[0][0]["host-name"] == "mt-solo-edge"
 
 
+def test_gather_inventory_multitenant_uses_vedges_with_vsession_from_switch() -> None:
+    """Production MT clusters return WAN edges on /system/device/vedges only with VSessionId."""
+
+    def dispatch(request: httpx.Request) -> httpx.Response:
+        u = str(request.url)
+        if u.rstrip("/").endswith("/dataservice/tenant"):
+            return httpx.Response(200, json={"data": [{"tenantId": "t1", "name": "Alpha"}]})
+        if request.method == "POST" and "/dataservice/tenant/t1/switch" in u:
+            return httpx.Response(
+                200,
+                json={"VSessionId": "vsession-alpha"},
+                headers={"VSessionId": "vsession-alpha"},
+            )
+        if "/dataservice/system/device/vedges" in u:
+            hdr = request.headers.get("VSessionId") or request.headers.get("vsessionid")
+            if hdr == "vsession-alpha":
+                return httpx.Response(
+                    200,
+                    json={
+                        "data": [
+                            {
+                                "uuid": "e-mt-1",
+                                "host-name": "mt-edge",
+                                "deviceType": "vedge",
+                                "reachability": "reachable",
+                            }
+                        ]
+                    },
+                )
+            return httpx.Response(200, json={"data": []})
+        if "/dataservice/system/device/controllers" in u:
+            return httpx.Response(200, json={"data": []})
+        if "/dataservice/device" in u:
+            return httpx.Response(
+                200,
+                json={"data": [{"uuid": "c1", "host-name": "vManage", "personality": "vmanage"}]},
+            )
+        return httpx.Response(404)
+
+    transport = httpx.MockTransport(dispatch)
+    with httpx.Client(transport=transport) as client:
+        rows, err = _gather_inventory_with_tenant_scopes(client, "https://vm.example.invalid")
+    assert err is False
+    assert len(rows) == 1
+    assert rows[0][0]["host-name"] == "mt-edge"
+
+
 def test_gather_inventory_multitenant_switches_per_tenant() -> None:
     state = {"tenant": ""}
 
@@ -250,6 +297,45 @@ def test_gather_inventory_multitenant_no_switchable_ids_errors() -> None:
         rows, err = _gather_inventory_with_tenant_scopes(client, "https://vm.example.invalid")
     assert rows == []
     assert err is True
+
+
+def test_fetch_device_inventory_supplements_vedges_when_primary_is_controllers_only() -> None:
+    """Multitenant builds may return only control-plane rows on GET /dataservice/device."""
+
+    def dispatch(request: httpx.Request) -> httpx.Response:
+        u = str(request.url)
+        if u.rstrip("/").endswith("/dataservice/device"):
+            return httpx.Response(
+                200,
+                json={
+                    "data": [
+                        {"uuid": "c1", "host-name": "vManage", "deviceType": "vmanage"},
+                        {"uuid": "c2", "host-name": "vSmart1", "deviceType": "vsmart"},
+                    ]
+                },
+            )
+        if "/dataservice/system/device/vedges" in u:
+            return httpx.Response(
+                200,
+                json={
+                    "data": [
+                        {
+                            "uuid": "e1",
+                            "host-name": "mt-edge-1",
+                            "deviceType": "vedge",
+                            "reachability": "reachable",
+                        }
+                    ]
+                },
+            )
+        return httpx.Response(404)
+
+    transport = httpx.MockTransport(dispatch)
+    with httpx.Client(transport=transport) as client:
+        rows = fetch_device_inventory(client, "https://vmanager.example.invalid")
+    assert len(rows) == 3
+    hosts = {str(r.get("host-name") or r.get("hostname") or "") for r in rows}
+    assert "mt-edge-1" in hosts
 
 
 def test_fetch_device_inventory_fallback_when_device_empty() -> None:

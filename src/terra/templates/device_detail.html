@@ -54,6 +54,42 @@
       </div>
     </dl>
 
+    <section
+      id="terra-cellular-history-root"
+      class="terra-cellular-history{% if not has_cellular %} terra-cellular-history--hidden{% endif %}"
+      data-device-id="{{ device.id }}"
+      data-has-cellular="{{ 'true' if has_cellular else 'false' }}"
+      aria-labelledby="terra-cellular-history-heading"
+    >
+      <h2 id="terra-cellular-history-heading" class="terra-section-title">Cellular signal history</h2>
+      <p class="terra-muted terra-detail-hint">
+        RF metrics from Manager EIOLTE statistics (background sync). Toggle series, zoom, or brush a time range.
+        Units are dBm unless noted.
+      </p>
+      <div class="terra-cellular-history-toolbar" role="toolbar" aria-label="Cellular chart controls">
+        <div class="terra-cellular-history-metrics" role="group" aria-label="Metrics">
+          <label class="terra-cellular-metric-toggle"><input type="checkbox" id="terra-cellular-metric-rsrp" checked /> RSRP</label>
+          <label class="terra-cellular-metric-toggle"><input type="checkbox" id="terra-cellular-metric-rsrq" checked /> RSRQ</label>
+        </div>
+        <div class="terra-cellular-history-presets" role="group" aria-label="Time range">
+          <button type="button" class="terra-btn terra-btn--inline terra-btn--outlined" data-terra-range-hours="6">6h</button>
+          <button type="button" class="terra-btn terra-btn--inline terra-btn--outlined terra-cellular-range--active" data-terra-range-hours="24">24h</button>
+          <button type="button" class="terra-btn terra-btn--inline terra-btn--outlined" data-terra-range-hours="168">7d</button>
+        </div>
+        <button type="button" id="terra-cellular-expand-btn" class="terra-btn terra-btn--inline terra-btn--outlined">Expand chart</button>
+        <span id="terra-cellular-history-status" class="terra-muted" role="status"></span>
+      </div>
+      <div id="terra-cellular-chart" class="terra-cellular-chart" aria-label="Cellular RF time series chart"></div>
+    </section>
+    <div id="terra-cellular-chart-overlay" class="terra-cellular-overlay" hidden>
+      <div class="terra-cellular-overlay__panel" role="dialog" aria-modal="true" aria-label="Cellular signal history (expanded)">
+        <div class="terra-cellular-overlay__toolbar">
+          <button type="button" id="terra-cellular-overlay-close" class="terra-btn terra-btn--inline terra-btn--outlined">Close</button>
+        </div>
+        <div id="terra-cellular-chart-expanded" class="terra-cellular-chart terra-cellular-chart--expanded"></div>
+      </div>
+    </div>
+
     <h2 class="terra-section-title">Network interfaces</h2>
     <p class="terra-muted terra-detail-hint">
       Parsed from the last <strong>inventory sync</strong> (background job merges interface/cellular dataservice rows
@@ -179,6 +215,8 @@
 </div>
 {% endblock %}
 {% block extra_scripts %}
+<script src="/static/vendor/echarts.min.js"></script>
 <script src="/static/js/terra-datetime-local.js"></script>
 <script src="/static/js/terra-device-detail-live.js"></script>
+<script src="/static/js/terra-device-cellular.js"></script>
 {% endblock %}

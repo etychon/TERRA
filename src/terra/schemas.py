@@ -182,3 +182,71 @@ class LiveSdWanDeviceResponse(BaseModel):
     note: str | None = None
     interfaces: list[LiveSdWanInterfaceRow] = Field(default_factory=list)
     cellular_tables: list[LiveSdWanCellularTable] = Field(default_factory=list)
+
+
+class CellularHistorySeries(BaseModel):
+    """One RF metric time series for a slot/SIM dimension."""
+
+    metric: str
+    unit: str = "dBm"
+    slot: str = ""
+    active_sim: str = ""
+    timestamps: list[int] = Field(default_factory=list)
+    values: list[float] = Field(default_factory=list)
+
+
+class CellularHistoryResponse(BaseModel):
+    """EIOLTE history from VictoriaMetrics for device detail chart."""
+
+    ok: bool = True
+    device_id: int
+    has_cellular: bool = False
+    start_unix: float
+    end_unix: float
+    series: list[CellularHistorySeries] = Field(default_factory=list)
+    note: str | None = None
+
+
+class CellularSparklinePoint(BaseModel):
+    t: int
+    v: float
+
+
+class CellularSparklineItem(BaseModel):
+    device_id: int
+    has_cellular: bool = False
+    points: list[CellularSparklinePoint] = Field(default_factory=list)
+    latest_rssi: float | None = None
+    quality: str = "unknown"
+
+
+class CellularSparklinesResponse(BaseModel):
+    items: list[CellularSparklineItem] = Field(default_factory=list)
+
+
+class DeviceHomeRow(BaseModel):
+    """One row in the devices grid (list API + React island)."""
+
+    id: int
+    cluster: str
+    manager: str
+    tenant: str
+    hostname: str
+    serial_number: str
+    model: str
+    software_version: str
+    device_type: str
+    site_name: str
+    site_id: str = "—"
+    reachability: str
+    state_changed_at_utc: str
+    synced_at_utc: str
+    has_cellular: bool = False
+    owner_email: str = ""
+
+
+class DevicesListResponse(BaseModel):
+    items: list[DeviceHomeRow] = Field(default_factory=list)
+    total: int = 0
+    limit: int = 50
+    offset: int = 0

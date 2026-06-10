@@ -23,11 +23,15 @@ from terra.config import get_settings
 from terra.db import sdwan_batch_needs_serial_execution
 from terra.inventory_extract import deep_find_serial
 from terra.models import SdWanLinkStatus, SdWanManagerInstance, SyncedDevice
-from terra.sdwan_client import read_manager_version
-from terra.sdwan_dataservice_rows import rows_from_dataservice_body
-from terra.sdwan_device_live import enrich_inventory_row_for_sync
-from terra.sdwan_http import open_manager_http_client, refresh_sdwan_dataservice_csrf_header
-from terra.sdwan_operator_log import clear_sdwan_http_log_tenant, set_sdwan_http_log_tenant
+from terra_sdwan.sdwan_client import read_manager_version
+from terra_sdwan.sdwan_dataservice_rows import rows_from_dataservice_body
+from terra_sdwan.sdwan_device_live import enrich_inventory_row_for_sync
+from terra_sdwan.sdwan_http import (
+    manager_credential_mode,
+    open_manager_http_client,
+    refresh_sdwan_dataservice_csrf_header,
+)
+from terra_sdwan.sdwan_operator_log import clear_sdwan_http_log_tenant, set_sdwan_http_log_tenant
 
 logger = logging.getLogger(__name__)
 
@@ -72,6 +76,11 @@ _FALLBACK_DEVICE_PATHS: tuple[str, ...] = (
     "system/device/vedges",
     "system/device/controllers",
 )
+_VEDGES_FALLBACK_PATH = _FALLBACK_DEVICE_PATHS[0]
+
+_CONTROLLER_DEVICE_TYPES: frozenset[str] = frozenset(
+    {"vmanage", "vsmart", "vbond", "vcontainer", "vmanage-system"}
+)
 
 
 def _utcnow() -> datetime:
@@ -100,6 +109,23 @@ def _coalesce_str(d: dict[str, Any], *keys: str, default: str = "") -> str:
         if s:
             return s
     return default
+
+
+def _is_controller_inventory_row(device_type: str, hostname: str) -> bool:
+    """Match ``terra.crud_sdwan._is_controller_inventory_row`` (control-plane only)."""
+    dt = (device_type or "").strip().lower()
+    if not dt:
+        return False
+    if dt in _CONTROLLER_DEVICE_TYPES or dt.startswith("vmanage"):
+        return True
+    host = (hostname or "").strip().lower()
+    return host in ("vmanage", "vbond", "vsmart", "vsmart2")
+
+
+def _raw_row_is_wan_edge(row: dict[str, Any]) -> bool:
+    host = _coalesce_str(row, "host-name", "hostname", "ncsDeviceName", "vedgeName")
+    dev_type = _coalesce_str(row, "deviceType", "device-type", "personality", "vedgePersonality")
+    return not _is_controller_inventory_row(dev_type, host)
 
 
 _CPU_ARCH_RE = re.compile(
@@ -276,17 +302,46 @@ def fetch_tenant_list(
     return rows_from_dataservice_body(body)
 
 
+def _vsession_id_from_switch_response(response: httpx.Response) -> str | None:
+    """``POST …/tenant/{id}/switch`` returns tenant scope via ``VSessionId`` (header and/or JSON body)."""
+    for key in ("VSessionId", "vsessionid", "vSessionId"):
+        raw = response.headers.get(key)
+        if isinstance(raw, str) and raw.strip():
+            return raw.strip()
+    try:
+        body = response.json()
+    except ValueError:
+        return None
+    if not isinstance(body, dict):
+        return None
+    for key in ("VSessionId", "vSessionId", "vsessionId"):
+        raw = body.get(key)
+        if isinstance(raw, str) and raw.strip():
+            return raw.strip()
+    data = body.get("data")
+    if isinstance(data, dict):
+        raw = data.get("VSessionId") or data.get("vSessionId")
+        if isinstance(raw, str) and raw.strip():
+            return raw.strip()
+    return None
+
+
 def switch_tenant(
     client: httpx.Client, base_url: str, tenant_id: str, *, request_timeout: float | None = None
-) -> None:
-    """``POST /dataservice/tenant/{tenantId}/switch`` — subsequent dataservice calls use tenant scope."""
+) -> str | None:
+    """
+    ``POST /dataservice/tenant/{tenantId}/switch`` — establishes tenant scope.
+
+    Returns ``VSessionId`` when the Manager provides one. Callers should keep that header on
+    ``GET /dataservice/system/device/vedges`` (and controllers); do **not** rely on
+    ``GET /dataservice/device`` with ``VSessionId`` (often empty on multitenant builds).
+    """
     tid = str(tenant_id).strip()
     if not tid:
         msg = "tenant id required for switch"
         raise ValueError(msg)
     base = base_url.rstrip("/")
     to = float(request_timeout) if request_timeout is not None else _inventory_http_timeout_seconds()
-    # VSessionId from a prior vsession call breaks some GETs (e.g. /device); tenant switch uses cookies + CSRF.
     client.headers.pop("VSessionId", None)
     r = client.post(
         f"{base}/dataservice/tenant/{tid}/switch",
@@ -297,6 +352,63 @@ def switch_tenant(
     if r.status_code >= 400:
         msg = f"tenant switch HTTP {r.status_code}"
         raise RuntimeError(msg)
+    vs = _vsession_id_from_switch_response(r)
+    if vs:
+        client.headers["VSessionId"] = vs
+    return vs
+
+
+def _get_dataservice_inventory_rows(
+    client: httpx.Client,
+    base: str,
+    path: str,
+    *,
+    request_timeout: float,
+) -> list[dict[str, Any]]:
+    r = client.get(f"{base}/dataservice/{path}", headers={"Accept": "application/json"}, timeout=request_timeout)
+    if r.status_code >= 400:
+        return []
+    try:
+        body = r.json()
+    except ValueError:
+        return []
+    return rows_from_dataservice_body(body)
+
+
+def _fetch_device_inventory_with_vsession(
+    client: httpx.Client,
+    base: str,
+    request_timeout: float,
+) -> list[dict[str, Any]]:
+    """
+    Multitenant tenant scope: WAN edges and controllers come from system device category APIs.
+
+    ``GET /dataservice/device`` with ``VSessionId`` is intentionally skipped (commonly empty).
+    """
+    merged: dict[str, dict[str, Any]] = {}
+    order: list[str] = []
+
+    def ingest(rows: list[dict[str, Any]]) -> None:
+        for item in rows:
+            k = _stable_device_key(item)
+            if k not in merged:
+                order.append(k)
+                merged[k] = item
+            else:
+                cur = merged[k]
+                for fk, fv in item.items():
+                    if fk not in cur or cur.get(fk) in (None, "", []):
+                        cur[fk] = fv
+
+    vedge_rows = _get_dataservice_inventory_rows(
+        client, base, _VEDGES_FALLBACK_PATH, request_timeout=request_timeout
+    )
+    ingest(vedge_rows)
+    controller_rows = _get_dataservice_inventory_rows(
+        client, base, "system/device/controllers", request_timeout=request_timeout
+    )
+    ingest(controller_rows)
+    return [merged[k] for k in order]
 
 
 def fetch_device_inventory(
@@ -308,6 +420,9 @@ def fetch_device_inventory(
     """GET /dataservice/device (and fallbacks) — full inventory list."""
     base = base_url.rstrip("/")
     to = float(request_timeout) if request_timeout is not None else _inventory_http_timeout_seconds()
+    vs = (client.headers.get("VSessionId") or client.headers.get("vsessionid") or "").strip()
+    if vs:
+        return _fetch_device_inventory_with_vsession(client, base, to)
     r = client.get(f"{base}/dataservice/device", headers={"Accept": "application/json"}, timeout=to)
     if r.status_code >= 400:
         msg = f"device inventory HTTP {r.status_code}"
@@ -336,16 +451,13 @@ def fetch_device_inventory(
     primary = rows_from_dataservice_body(body)
     ingest(primary)
 
+    has_wan_edge = any(_raw_row_is_wan_edge(item) for item in merged.values())
+    if not has_wan_edge:
+        ingest(_get_dataservice_inventory_rows(client, base, _VEDGES_FALLBACK_PATH, request_timeout=to))
+
     if not merged:
         for path in _FALLBACK_DEVICE_PATHS:
-            r2 = client.get(f"{base}/dataservice/{path}", headers={"Accept": "application/json"}, timeout=to)
-            if r2.status_code >= 400:
-                continue
-            try:
-                b2 = r2.json()
-            except ValueError:
-                continue
-            ingest(rows_from_dataservice_body(b2))
+            ingest(_get_dataservice_inventory_rows(client, base, path, request_timeout=to))
 
     return [merged[k] for k in order]
 
@@ -418,131 +530,31 @@ def _delete_stale_devices_for_instance(db: Session, instance_id: int, seen: set[
             db.delete(d)
 
 
-def sync_devices_for_instance(
+def _upsert_devices_from_inventory(
     db: Session,
-    secret_key: str,
     inst: SdWanManagerInstance,
-    progress_notify: Callable[[str, int, str], None] | None = None,
-    cancel_check: Callable[[], bool] | None = None,
-) -> tuple[int, str | None]:
-    """
-    Upsert devices for one Manager instance. Returns (rows_touched, error_message).
-    All timestamps written in UTC.
-
-    ``progress_notify(phase, percent, message)`` is optional UI feedback (async sync jobs).
-    ``cancel_check`` returns True when the operator requested cancellation (cooperative; checked between steps).
-    """
-    if inst.link_status != SdWanLinkStatus.connected.value:
-        _progress_notify(progress_notify, "failed", 100, "Manager is not connected — run Verify first.")
-        return 0, "instance not connected"
-
-    now = _utcnow()
+    rows_scoped: list[tuple[dict[str, Any], str, str]],
+    now: datetime,
+    progress_notify: Callable[[str, int, str], None] | None,
+    cancel_check: Callable[[], bool] | None,
+    *,
+    pct_lo: int,
+    pct_hi: int,
+) -> tuple[int, set[tuple[str, str]]]:
+    """Insert or update ``SyncedDevice`` rows from inventory JSON (``seen`` drives stale deletion)."""
     touched = 0
     seen: set[tuple[str, str]] = set()
-    tenant_phase_errors = False
-    try:
-        settings = get_settings()
-        inv_to = float(settings.sdwan_sync_inventory_timeout_seconds)
-        _raise_if_cancelled(cancel_check)
-        _progress_notify(progress_notify, "connecting", 6, "Opening HTTP session to SD-WAN Manager…")
-        with open_manager_http_client(secret_key, inst) as client:
-            _progress_notify(progress_notify, "connected", 14, "Session ready — downloading device inventory…")
-            rows_scoped, tenant_phase_errors = _gather_inventory_with_tenant_scopes(
-                client, inst.base_url, inventory_timeout=inv_to
-            )
-            _raise_if_cancelled(cancel_check)
-            _progress_notify(
-                progress_notify,
-                "inventory",
-                32,
-                f"Inventory received ({len(rows_scoped)} row(s)) — reading Manager version…",
-            )
-            mv = read_manager_version(client, inst.base_url, request_timeout=inv_to)
-            if mv:
-                inst.manager_version = mv[:128]
-
-            enrich = (
-                settings.sdwan_sync_enrich_device_details
-                and len(rows_scoped) <= settings.sdwan_sync_enrich_max_inventory_devices
-            )
-            if enrich and rows_scoped:
-                enriched_scoped: list[tuple[dict[str, Any], str, str]] = []
-                n_en = len(rows_scoped)
-                step = max(1, n_en // 10)
-                for i, (raw, tid_scope, tname_scope) in enumerate(rows_scoped):
-                    _raise_if_cancelled(cancel_check)
-                    tlog = (tname_scope or tid_scope or "").strip()
-                    set_sdwan_http_log_tenant(tlog)
-                    if progress_notify and (i % step == 0 or i == n_en - 1):
-                        _progress_notify(
-                            progress_notify,
-                            "enriching",
-                            38 + min(22, int(22 * i / max(n_en, 1))),
-                            f"Enriching device details ({i + 1} of {n_en})…",
-                        )
-                    try:
-                        enriched_scoped.append(
-                            (
-                                enrich_inventory_row_for_sync(
-                                    client,
-                                    inst.base_url,
-                                    raw,
-                                    request_timeout=settings.sdwan_sync_enrich_request_timeout_seconds,
-                                ),
-                                tid_scope,
-                                tname_scope,
-                            )
-                        )
-                    except Exception:
-                        logger.debug(
-                            "SD-WAN per-device enrich failed (instance id=%s name=%r)",
-                            inst.id,
-                            inst.display_name,
-                            exc_info=True,
-                        )
-                        enriched_scoped.append((raw, tid_scope, tname_scope))
-                rows_scoped = enriched_scoped
-            elif rows_scoped:
-                _progress_notify(
-                    progress_notify,
-                    "inventory",
-                    44,
-                    "Skipping per-device enrichment (disabled or large fleet).",
-                )
-    except (RuntimeError, ValueError, httpx.RequestError, OSError) as e:
-        msg = str(e)[:500]
-        inst.last_error = f"Inventory sync: {msg}"[:1000]
-        db.add(inst)
-        logger.warning(
-            "SD-WAN device sync failed for instance %s (%s): %s",
-            inst.id,
-            inst.display_name,
-            e,
-        )
-        _progress_notify(progress_notify, "failed", 100, msg)
-        return 0, msg
-
-    if not rows_scoped and tenant_phase_errors:
-        msg = (
-            "Multitenant inventory returned no devices after tenant switching "
-            "(tenant switch or per-tenant /dataservice/device failed, XSRF rejected, or empty responses). "
-            "Confirm the API token has Device read scope; for JWT, CSRF must be accepted after "
-            "GET /dataservice/client/server."
-        )[:500]
-        inst.last_error = f"Inventory sync: {msg}"[:1000]
-        db.add(inst)
-        _progress_notify(progress_notify, "failed", 100, msg)
-        return 0, msg
-
     n_save = len(rows_scoped)
-    step_s = max(1, n_save // 10)
+    step_s = max(1, n_save // 10) if n_save else 1
+    span = max(1, pct_hi - pct_lo)
     for si, (raw, tenant_id_scope, tenant_name_scope) in enumerate(rows_scoped):
         _raise_if_cancelled(cancel_check)
         if progress_notify and n_save and (si % step_s == 0 or si == n_save - 1):
+            cur_pct = pct_lo + min(span, int(span * si / max(n_save, 1)))
             _progress_notify(
                 progress_notify,
                 "saving",
-                62 + min(28, int(28 * si / max(n_save, 1))),
+                cur_pct,
                 f"Writing devices to database ({si + 1} of {n_save})…",
             )
         norm = normalize_inventory_row(raw)
@@ -600,10 +612,307 @@ def sync_devices_for_instance(
         existing.sdwan_tenant_name = tlabel
         touched += 1
 
+    return touched, seen
+
+
+def _enrich_one_scoped_row(
+    secret_key: str,
+    inst: SdWanManagerInstance,
+    row_tuple: tuple[dict[str, Any], str, str],
+    request_timeout: float,
+) -> tuple[dict[str, Any], str, str]:
+    raw, tid_scope, tname_scope = row_tuple
+    tlog = (tname_scope or tid_scope or "").strip()
+    try:
+        set_sdwan_http_log_tenant(tlog)
+        with open_manager_http_client(secret_key, inst, log_tenant=tlog) as c:
+            eraw = enrich_inventory_row_for_sync(
+                c,
+                inst.base_url,
+                raw,
+                request_timeout=request_timeout,
+                verify_tls=inst.verify_tls,
+            )
+        return (eraw, tid_scope, tname_scope)
+    except Exception:
+        logger.debug(
+            "SD-WAN per-device enrich failed (instance id=%s name=%r)",
+            inst.id,
+            inst.display_name,
+            exc_info=True,
+        )
+        return (raw, tid_scope, tname_scope)
+    finally:
+        clear_sdwan_http_log_tenant()
+
+
+def _enrich_rows_scoped_parallel(
+    secret_key: str,
+    inst: SdWanManagerInstance,
+    rows_scoped: list[tuple[dict[str, Any], str, str]],
+    request_timeout: float,
+    max_workers: int,
+    progress_notify: Callable[[str, int, str], None] | None,
+    cancel_check: Callable[[], bool] | None,
+) -> list[tuple[dict[str, Any], str, str]]:
+    """Per-device enrich; parallel only for JWT single-tenant style inventories (see caller)."""
+    n_en = len(rows_scoped)
+    if n_en == 0:
+        return []
+    if max_workers <= 1:
+        out: list[tuple[dict[str, Any], str, str]] = []
+        step = max(1, n_en // 10)
+        with open_manager_http_client(secret_key, inst) as c:
+            for i, (raw, tid_scope, tname_scope) in enumerate(rows_scoped):
+                _raise_if_cancelled(cancel_check)
+                tlog = (tname_scope or tid_scope or "").strip()
+                set_sdwan_http_log_tenant(tlog)
+                if progress_notify and (i % step == 0 or i == n_en - 1):
+                    _progress_notify(
+                        progress_notify,
+                        "enriching",
+                        62 + min(22, int(22 * i / max(n_en, 1))),
+                        f"Enriching device details ({i + 1} of {n_en})…",
+                    )
+                try:
+                    out.append(
+                        (
+                            enrich_inventory_row_for_sync(
+                                c,
+                                inst.base_url,
+                                raw,
+                                request_timeout=request_timeout,
+                                verify_tls=inst.verify_tls,
+                            ),
+                            tid_scope,
+                            tname_scope,
+                        )
+                    )
+                except Exception:
+                    logger.debug(
+                        "SD-WAN per-device enrich failed (instance id=%s name=%r)",
+                        inst.id,
+                        inst.display_name,
+                        exc_info=True,
+                    )
+                    out.append((raw, tid_scope, tname_scope))
+                finally:
+                    clear_sdwan_http_log_tenant()
+        return out
+
+    out_mut: list[tuple[dict[str, Any], str, str]] = list(rows_scoped)
+    completed = 0
+    step = max(1, n_en // 10)
+    with ThreadPoolExecutor(max_workers=max_workers, thread_name_prefix="terra-sdwan-enrich") as pool:
+        fut_to_idx = {
+            pool.submit(_enrich_one_scoped_row, secret_key, inst, rows_scoped[i], request_timeout): i
+            for i in range(n_en)
+        }
+        for fut in as_completed(fut_to_idx):
+            _raise_if_cancelled(cancel_check)
+            idx = fut_to_idx[fut]
+            try:
+                out_mut[idx] = fut.result()
+            except Exception:
+                out_mut[idx] = rows_scoped[idx]
+            completed += 1
+            if progress_notify and (completed % step == 0 or completed == n_en):
+                _progress_notify(
+                    progress_notify,
+                    "enriching",
+                    62 + min(22, int(22 * completed / max(n_en, 1))),
+                    f"Enriching device details ({completed} of {n_en})…",
+                )
+    return out_mut
+
+
+def _apply_enriched_raw_to_db(
+    db: Session,
+    inst: SdWanManagerInstance,
+    enriched_scoped: list[tuple[dict[str, Any], str, str]],
+    now: datetime,
+    progress_notify: Callable[[str, int, str], None] | None,
+    cancel_check: Callable[[], bool] | None,
+) -> None:
+    """Merge enriched ``raw_json`` (and core columns) into rows written in pass A."""
+    n = len(enriched_scoped)
+    step = max(1, n // 10) if n else 1
+    for si, (raw, tenant_id_scope, tenant_name_scope) in enumerate(enriched_scoped):
+        _raise_if_cancelled(cancel_check)
+        if progress_notify and n and (si % step == 0 or si == n - 1):
+            _progress_notify(
+                progress_notify,
+                "saving",
+                86 + min(8, int(8 * si / max(n, 1))),
+                f"Merging enrichment ({si + 1} of {n})…",
+            )
+        norm = normalize_inventory_row(raw)
+        if not norm["source_device_uuid"]:
+            continue
+        uid = str(norm["source_device_uuid"])[:160]
+        tid = (tenant_id_scope or "")[:160]
+        tlabel = (tenant_name_scope or "")[:255]
+        existing = db.execute(
+            select(SyncedDevice).where(
+                SyncedDevice.sdwan_instance_id == inst.id,
+                SyncedDevice.source_device_uuid == uid,
+                SyncedDevice.sdwan_tenant_id == tid,
+            )
+        ).scalar_one_or_none()
+        if existing is None:
+            continue
+        raw_json = json.dumps(raw, separators=(",", ":"), default=str)
+        new_r = str(norm["reachability"])
+        old_r = existing.reachability
+        if old_r != new_r:
+            existing.state_changed_at_utc = now
+        existing.hostname = str(norm["hostname"])[:255]
+        existing.serial_number = str(norm["serial_number"])[:128]
+        existing.model = str(norm["model"])[:128]
+        existing.software_version = str(norm["software_version"])[:128]
+        existing.device_type = str(norm["device_type"])[:64]
+        existing.site_id = (str(norm["site_id"])[:64] if norm["site_id"] else None)
+        existing.reachability = new_r[:32]
+        existing.synced_at_utc = now
+        existing.raw_json = raw_json
+        existing.sdwan_tenant_name = tlabel
+
+
+def sync_devices_for_instance(
+    db: Session,
+    secret_key: str,
+    inst: SdWanManagerInstance,
+    progress_notify: Callable[[str, int, str], None] | None = None,
+    cancel_check: Callable[[], bool] | None = None,
+) -> tuple[int, str | None]:
+    """
+    Upsert devices for one Manager instance. Returns (rows_touched, error_message).
+    All timestamps written in UTC.
+
+    ``progress_notify(phase, percent, message)`` is optional UI feedback (async sync jobs).
+    ``cancel_check`` returns True when the operator requested cancellation (cooperative; checked between steps).
+    """
+    if inst.link_status != SdWanLinkStatus.connected.value:
+        _progress_notify(progress_notify, "failed", 100, "Manager is not connected — run Verify first.")
+        return 0, "instance not connected"
+
+    now = _utcnow()
+    rows_scoped: list[tuple[dict[str, Any], str, str]] = []
+    tenant_phase_errors = False
+    settings = get_settings()
+    auth_mode = manager_credential_mode(secret_key, inst)
+    try:
+        inv_to = float(settings.sdwan_sync_inventory_timeout_seconds)
+        _raise_if_cancelled(cancel_check)
+        _progress_notify(progress_notify, "connecting", 6, "Opening HTTP session to SD-WAN Manager…")
+        with open_manager_http_client(secret_key, inst) as client:
+            _progress_notify(progress_notify, "connected", 14, "Session ready — downloading device inventory…")
+            rows_scoped, tenant_phase_errors = _gather_inventory_with_tenant_scopes(
+                client, inst.base_url, inventory_timeout=inv_to
+            )
+            _raise_if_cancelled(cancel_check)
+            _progress_notify(
+                progress_notify,
+                "inventory",
+                32,
+                f"Inventory received ({len(rows_scoped)} row(s)) — reading Manager version…",
+            )
+            mv = read_manager_version(client, inst.base_url, request_timeout=inv_to)
+            if mv:
+                inst.manager_version = mv[:128]
+    except (RuntimeError, ValueError, httpx.RequestError, OSError) as e:
+        msg = str(e)[:500]
+        inst.last_error = f"Inventory sync: {msg}"[:1000]
+        db.add(inst)
+        logger.warning(
+            "SD-WAN device sync failed for instance %s (%s): %s",
+            inst.id,
+            inst.display_name,
+            e,
+        )
+        _progress_notify(progress_notify, "failed", 100, msg)
+        return 0, msg
+
+    if not rows_scoped and tenant_phase_errors:
+        msg = (
+            "Multitenant inventory returned no devices after tenant switching "
+            "(tenant switch or per-tenant /dataservice/device failed, XSRF rejected, or empty responses). "
+            "Confirm the API token has Device read scope; for JWT, CSRF must be accepted after "
+            "GET /dataservice/client/server."
+        )[:500]
+        inst.last_error = f"Inventory sync: {msg}"[:1000]
+        db.add(inst)
+        _progress_notify(progress_notify, "failed", 100, msg)
+        return 0, msg
+
+    enrich = (
+        settings.sdwan_sync_enrich_device_details
+        and len(rows_scoped) > 0
+        and len(rows_scoped) <= settings.sdwan_sync_enrich_max_inventory_devices
+    )
+
+    if enrich:
+        touched, seen = _upsert_devices_from_inventory(
+            db, inst, rows_scoped, now, progress_notify, cancel_check, pct_lo=40, pct_hi=55
+        )
+        if not tenant_phase_errors:
+            _raise_if_cancelled(cancel_check)
+            _delete_stale_devices_for_instance(db, inst.id, seen)
+        _raise_if_cancelled(cancel_check)
+        inst.devices_last_sync_at_utc = now
+        if inst.last_error and str(inst.last_error).startswith("Inventory sync:"):
+            inst.last_error = None
+        db.add(inst)
+        _progress_notify(
+            progress_notify,
+            "saving",
+            58,
+            "WAN edge list saved — fetching per-device details…",
+        )
+        db.commit()
+
+        _raise_if_cancelled(cancel_check)
+        multitenant_inventory = any(str(tid or "").strip() for _, tid, _ in rows_scoped)
+        max_w = 1
+        if auth_mode == "jwt" and not multitenant_inventory:
+            max_w = max(1, min(int(settings.sdwan_sync_enrich_concurrency), len(rows_scoped)))
+        to = float(settings.sdwan_sync_enrich_request_timeout_seconds)
+        rows_enriched = _enrich_rows_scoped_parallel(
+            secret_key, inst, rows_scoped, to, max_w, progress_notify, cancel_check
+        )
+        _apply_enriched_raw_to_db(db, inst, rows_enriched, now, progress_notify, cancel_check)
+        _raise_if_cancelled(cancel_check)
+        _progress_notify(progress_notify, "finishing", 96, "Finalizing inventory…")
+        db.add(inst)
+        _progress_notify(progress_notify, "complete", 100, "Inventory sync complete.")
+        return touched, None
+
+    if rows_scoped:
+        _progress_notify(
+            progress_notify,
+            "inventory",
+            44,
+            "Skipping per-device enrichment (disabled or large fleet).",
+        )
+        touched, seen = _upsert_devices_from_inventory(
+            db, inst, rows_scoped, now, progress_notify, cancel_check, pct_lo=58, pct_hi=88
+        )
+        if not tenant_phase_errors:
+            _raise_if_cancelled(cancel_check)
+            _delete_stale_devices_for_instance(db, inst.id, seen)
+        _raise_if_cancelled(cancel_check)
+        _progress_notify(progress_notify, "finishing", 96, "Finalizing inventory…")
+        inst.devices_last_sync_at_utc = now
+        if inst.last_error and str(inst.last_error).startswith("Inventory sync:"):
+            inst.last_error = None
+        db.add(inst)
+        _progress_notify(progress_notify, "complete", 100, "Inventory sync complete.")
+        return touched, None
+
+    touched = 0
     if not tenant_phase_errors:
         _raise_if_cancelled(cancel_check)
-        _delete_stale_devices_for_instance(db, inst.id, seen)
-
+        _delete_stale_devices_for_instance(db, inst.id, set())
     _raise_if_cancelled(cancel_check)
     _progress_notify(progress_notify, "finishing", 96, "Finalizing inventory…")
     inst.devices_last_sync_at_utc = now
@@ -640,6 +949,16 @@ def _sync_one_manager_worker(secret_key: str, instance_id: int) -> dict[str, Any
                 return out
             try:
                 n, err = sync_devices_for_instance(db, secret_key, inst)
+                if err is None:
+                    try:
+                        from terra_sdwan.sdwan_cellular_history import sync_cellular_history_for_instance
+
+                        sync_cellular_history_for_instance(db, secret_key, inst)
+                    except Exception:
+                        logger.exception(
+                            "Cellular history sync failed instance_id=%s",
+                            instance_id,
+                        )
                 db.commit()
             except Exception:
                 logger.exception(
@@ -843,6 +1162,12 @@ def _execute_sdwan_manager_sync_batch(
             "terra_sdwan_managers": n_m,
         },
     )
+    try:
+        from terra.telemetry_vm import push_sdwan_sync_batch_telemetry
+
+        push_sdwan_sync_batch_telemetry(results=results, batch_kind=batch_kind, _run_id=run_id)
+    except Exception:
+        logger.debug("VictoriaMetrics telemetry push skipped", exc_info=True)
     return results
 
 

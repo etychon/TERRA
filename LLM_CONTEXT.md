@@ -2,7 +2,7 @@
 
 > **Audience:** coding agents and LLM-assisted workflows. This file is dense and intentionally overlaps only minimally with `README.md` and `specs/`. Humans should prefer `README.md` + `specs/`.
 
-> **Mandatory default run:** from repo root, **`docker compose up --build -d`** — then **`https://localhost:4434`** (TLS via `web` → `api`; override host port with `TERRA_HTTPS_PORT` in `.env`). Default TLS is **self-signed** unless `docker/certs/server.crt` and `server.key` are supplied. Do not document or implement a different “official” bring-up path without updating this file, `README.md`, `AGENTS.md`, and `specs/architecture.md` in the same change.
+> **Mandatory default run:** from repo root, **`docker compose up --build -d`** — then **`https://localhost:4434`** (TLS via `web` → **`core`**; override host port with `TERRA_HTTPS_PORT` in `.env`). Default TLS is **self-signed** unless `docker/certs/server.crt` and `server.key` are supplied. Do not document or implement a different “official” bring-up path without updating this file, `README.md`, `AGENTS.md`, and `specs/architecture.md` in the same change.
 
 ## Codename and positioning
 
@@ -24,7 +24,7 @@ Surface **compact** device cards or equivalents, not Manager clone screens:
 - **Health:** CPU, memory, disk, process or platform pressure signals available from APIs.
 - **Transport:** WAN interface utilization; **cellular** signal/quality and detailed drill-down view; single-uplink scenarios must degrade gracefully (no false “all green” when the only path is marginal).
 - **Edge compute:** IOx application status when exposed via APIs/device model.
-- **Location:** GPS **history** (~minutes granularity, **~24h retention** in product terms — implementation may be time-series DB; see `specs/architecture.md`).
+- **~30-day GPS / metrics retention:** default Compose includes **VictoriaMetrics** (see `specs/telemetry-storage.md`); prefer Cisco Manager historical APIs when they cover the window.
 - **Reporting / audit:** scheduled or on-demand exports, **events**, **alerts**, audit trails of dashboard actions (not Manager audit unless explicitly integrated).
 
 ## UI stack, design system, and AI ergonomics
@@ -116,9 +116,10 @@ Use **multi-arch base images** and/or explicit `platform` policies only where ne
 - **`specs/`:** keep short; update with behavioral PRs. **`specs/design-system.md`** owns UI SSOT rules. **`specs/sdwan-manager-api.md`** maps which **Cisco Catalyst SD-WAN Manager** dataservice paths TERRA uses (auth, inventory, live reads); deeper multitenant/interface narrative lives in **`specs/integrations.md`**.
 - **`frontend/`:** dashboard UI, Tailwind + shadcn-oriented setup, **tokens** (`src/tokens/`), **globals.css**, ESLint design guardrails.
 - **`.cursor/skills/terra-ui-design-system/`:** Cursor **SKILL** for agents implementing UI (loads detailed guardrails + file paths).
-- **`src/terra/`:** FastAPI backend (auth, RBAC, APIs); **must** remain reachable via the Compose `api` service and `/health`.
-- **`docker-compose.yml` + `Dockerfile` + `docker/web/`:** mandatory operator entrypoint; **HTTPS on host port 4434** by default (`web` nginx terminates TLS; `api` is internal HTTP). Keep defaults dev-safe and document production overrides (`TERRA_SECRET_KEY`, external certs in `docker/certs/`, etc.).
-- **`frontend/`:** dashboard design-system package (tokens, lint); when a **runnable** SPA or static server is added, it **must** ship in Compose alongside `api` (same single `docker compose up` story).
+- **`src/terra_sdwan/`:** SD-WAN Manager HTTP client, inventory sync, live dataservice reads — shared by **`core`** and **`collector`**.
+- **`src/terra/`:** FastAPI **`core`** app (auth, RBAC, APIs, Jinja UI); **must** remain reachable via the Compose **`core`** service and `/health`.
+- **`docker-compose.yml` + `Dockerfile` + `docker/web/`:** mandatory operator entrypoint; **HTTPS on host port 4434** by default (`web` nginx terminates TLS; **`core`** is internal HTTP on :8000). Default Compose adds **`postgres`**, **`victoriametrics`**, and **`collector`** (see `specs/architecture.md`). Keep defaults dev-safe and document production overrides (`TERRA_SECRET_KEY`, external certs in `docker/certs/`, etc.).
+- **`frontend/`:** dashboard design-system package (tokens, lint); when a **runnable** SPA or static server is added, it **must** ship in Compose alongside **`core`** (same single `docker compose up` story).
 - **`tests/`:** unit, integration, smoke; smoke proves “wires connected” (Compose files present; app boots; **`GET /health`** when the API test client is used).
 - **`notebooks/`:** exploratory only; not production paths.
 - **`data/`:** fixtures and anonymized samples only.

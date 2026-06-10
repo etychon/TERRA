@@ -20,8 +20,8 @@
 ## Quality bar (when code exists)
 
 - **Run the stack:** from repo root, **`docker compose up --build -d`** is the canonical operator path (`README.md`, `LLM_CONTEXT.md`). Any new long-running service belongs in `docker-compose.yml` with healthchecks as appropriate.
-- **Lint:** `ruff check src/terra tests`.
-- **Types:** `mypy src/terra tests` (see `pyproject.toml`).
+- **Lint:** `ruff check src/terra src/terra_sdwan tests`.
+- **Types:** `mypy src/terra src/terra_sdwan tests` (see `pyproject.toml`).
 - **Frontend:** from **repo root**, `npm install` (workspaces) then `npm run lint` (runs `tsc --noEmit`, ESLint, design contract script on `terra-dashboard-frontend`). Use `npm run typecheck` alone when you only need TypeScript.
 - **Tests:** `pytest` (unit + integration as applicable; keep **smoke** tests fast and deterministic).
 - **Compose CI:** changes to `docker-compose.yml` / `Dockerfile` should keep `docker compose config` valid (CI runs it).

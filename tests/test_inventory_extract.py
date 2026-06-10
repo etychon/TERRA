@@ -6,9 +6,14 @@ from datetime import UTC, datetime
 
 from terra.inventory_extract import (
     deep_find_serial,
+    display_inventory_model,
+    display_inventory_serial,
+    display_ios_xe_release,
     display_serial,
+    display_site_name,
     extract_geo_lat_lng,
     extract_interface_rows,
+    model_serial_from_chassis_id,
     prepare_interface_detail_tables,
     utc_iso_for_json,
 )
@@ -111,6 +116,30 @@ def test_extract_interface_rows_vmanage_aliases() -> None:
 
 def test_display_serial_prefers_stored() -> None:
     assert display_serial("SN1", {"serialNumber": "SN2"}) == "SN1"
+
+
+def test_model_serial_from_chassis_id() -> None:
+    assert model_serial_from_chassis_id("IR1101-K9-FCW2252003R") == ("IR1101-K9", "FCW2252003R")
+    assert model_serial_from_chassis_id("short") == ("", "")
+
+
+def test_display_inventory_serial_from_uuid() -> None:
+    parsed = {"uuid": "IR1101-K9-FCW2252003R"}
+    assert display_inventory_serial("", parsed, source_uuid="IR1101-K9-FCW2252003R") == "FCW2252003R"
+
+
+def test_display_inventory_model_from_uuid() -> None:
+    parsed = {"uuid": "IR1101-K9-FCW2252003R", "deviceModel": "vedge-ISR1100-6G"}
+    assert display_inventory_model("", parsed, source_uuid="IR1101-K9-FCW2252003R") == "IR1101-K9"
+
+
+def test_display_ios_xe_release_trims_build() -> None:
+    assert display_ios_xe_release("17.16.01a.0.1625", None) == "17.16.01a"
+
+
+def test_display_site_name_prefers_site_name_field() -> None:
+    parsed = {"site-id": "400", "site-name": "SITE_100"}
+    assert display_site_name("400", parsed) == "SITE_100"
 
 
 def test_prepare_interface_detail_tables_wan_before_lan() -> None:
@@ -282,6 +311,27 @@ def test_interface_line_state_unicode_hyphen_leaf_echo() -> None:
     )
     assert rows[0]["oper_status"] == "Up"
     assert rows[0]["oper_tone"] == "success"
+
+
+def test_system_ip_from_inventory() -> None:
+    from terra.inventory_extract import system_ip_from_inventory
+
+    assert system_ip_from_inventory({"system-ip": "10.5.5.5", "uuid": "u"}) == "10.5.5.5"
+
+
+def test_device_has_cellular_from_interface_name() -> None:
+    from terra.inventory_extract import device_has_cellular_capability
+
+    parsed = {
+        "deviceInterface": [{"ifname": "Cellular0/4/0", "ip-address": "-"}],
+    }
+    assert device_has_cellular_capability(parsed) is True
+
+
+def test_device_has_cellular_from_model_hint() -> None:
+    from terra.inventory_extract import device_has_cellular_capability
+
+    assert device_has_cellular_capability({}, model="IR1101-K9") is True
 
 
 def test_interface_line_state_placeholder_without_ready_is_up() -> None:

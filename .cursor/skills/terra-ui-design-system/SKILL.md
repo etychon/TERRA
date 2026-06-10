@@ -5,7 +5,7 @@ description: >-
   Cisco-aligned semantic colors (no purple/indigo), Roboto + Roboto Mono, and the
   shared token/CSS-variable model. Covers frontend/ (Tailwind + shadcn-style tokens)
   and server-rendered Jinja pages (src/terra/static/css/, base.html). Use when
-  editing theme, tables, Tabulator, auth shell, sidebar, buttons, chips, motion, or
+  editing theme, tables, devices grid, auth shell, sidebar, buttons, chips, motion, or
   accessibility; or when the user mentions TERRA UI, Material 3, M3, design tokens,
   Cisco palette, dark mode, or pulsating gradients.
 disable-model-invocation: false
@@ -34,8 +34,8 @@ disable-model-invocation: false
 | Area | Files |
 |------|--------|
 | SPA / Tailwind dashboard | `frontend/src/tokens/`, `frontend/src/styles/globals.css`, shadcn-style components |
-| FastAPI Jinja UI (auth, home, admin, device pages) | `src/terra/templates/base.html`, `src/terra/static/css/terra-fonts.css` (self-hosted Roboto / Roboto Mono), `src/terra/static/css/terra-auth.css`, `src/terra/static/css/terra-devices.css`, `src/terra/static/vendor/tabulator.min.css` + scoped overrides |
-| Device grid JS | `src/terra/static/js/terra-devices-home.js` (formatters; keep HTML escaped in formatters) |
+| FastAPI Jinja UI (auth, home, admin, device pages) | `src/terra/templates/base.html`, `src/terra/static/css/terra-fonts.css` (self-hosted Roboto / Roboto Mono), `src/terra/static/css/terra-auth.css`, `src/terra/static/css/terra-devices.css` (compare/detail; grid styles in `frontend/src/devices/devices-grid.css`) |
+| Devices grid (React island) | `frontend/src/devices/` → Vite bundle `src/terra/static/dist/devices-grid.js`; column contract in `columnMeta.ts` |
 
 ## Token file contract (TypeScript dashboard)
 

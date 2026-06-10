@@ -8,13 +8,19 @@ from contextlib import contextmanager
 import httpx
 
 from terra.models import SdWanManagerInstance
-from terra.sdwan_operator_log import (
+from terra.secret_store import decrypt_json
+from terra_sdwan.sdwan_operator_log import (
     clear_sdwan_http_log_tenant,
     log_outbound_sdwan_request,
     set_sdwan_http_log_cluster,
     set_sdwan_http_log_tenant,
 )
-from terra.secret_store import decrypt_json
+
+
+def manager_credential_mode(secret_key: str, instance: SdWanManagerInstance) -> str:
+    """Return stored credential ``mode`` (``jwt`` / ``session`` / empty) without opening an HTTP client."""
+    payload = decrypt_json(secret_key, instance.credentials_encrypted)
+    return str(payload.get("mode", "")).lower().strip()
 
 
 def refresh_sdwan_dataservice_csrf_header(client: httpx.Client, base_url: str) -> bool:

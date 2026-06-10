@@ -1,7 +1,7 @@
 {% extends "base.html" %}
 {% block extra_head %}
-<link rel="stylesheet" href="/static/vendor/tabulator.min.css" />
 <link rel="stylesheet" href="/static/css/terra-devices.css" />
+<link rel="stylesheet" href="/static/dist/devices-grid.css" />
 {% endblock %}
 {% block header_nav %}
 <span class="terra-header-user" title="{{ user.email }}">{{ user.email }}</span>
@@ -22,71 +22,20 @@
     </p>
     <h2 class="terra-section-title">Devices across SD-WAN managers</h2>
     <p class="terra-sub">
-      <strong>Short tap</strong> a row to open readable device details. <strong>Long-press</strong> (~0.5s) a row to
-      enter bulk mode (selection column appears); then tap rows or use checkboxes — selection is kept when you change
-      pages. Choose two or more devices and click <strong>Compare selected</strong>. Use <strong>Columns</strong> to show
-      or hide fields; column order, visibility, and sort are remembered in your browser (localStorage). <strong>Account</strong>
+      <strong>Click</strong> a row to open device details. Use <strong>Select</strong> for bulk compare across pages.
+      <strong>Columns</strong> toggles visibility; preferences are stored in your browser. <strong>Account</strong>
       and <strong>Type</strong> are hidden by default; <strong>Tenant</strong> is shown by default for multi-tenant
-      clusters. <strong>Show control plane</strong> reveals vManage / vSmart / vBond (hidden by default so the grid
+      clusters. <strong>Show control elements</strong> reveals vManage / vSmart / vBond (hidden by default so the grid
       lists WAN edges). Everyone sees the full inventory; <strong>Account</strong> is the TERRA user who registered that SD-WAN
-      Manager.
+      cluster.
     </p>
-    <div id="terra-devices-bulk-banner" class="terra-devices-bulk-banner" role="status" hidden>
-      <span>Bulk selection mode — tap rows to add or remove. Selection persists across pages.</span>
-      <button id="terra-devices-bulk-exit" type="button" class="terra-btn terra-btn--inline terra-btn--outlined">Done</button>
-    </div>
-    <div class="terra-devices-toolbar">
-      <button id="terra-devices-sync-btn" class="terra-btn terra-btn--inline terra-btn--filled" type="button">Sync now</button>
-      <div class="terra-devices-columns-wrap">
-        <button
-          id="terra-devices-columns-btn"
-          class="terra-btn terra-btn--inline terra-btn--outlined"
-          type="button"
-          aria-haspopup="true"
-          aria-expanded="false"
-          aria-controls="terra-devices-columns-panel"
-        >
-          Columns
-        </button>
-        <div
-          id="terra-devices-columns-panel"
-          class="terra-devices-columns-panel"
-          role="group"
-          aria-label="Choose device table columns"
-          hidden
-        ></div>
-      </div>
-      <button
-        id="terra-devices-control-plane-btn"
-        class="terra-btn terra-btn--inline terra-btn--outlined"
-        type="button"
-        aria-pressed="false"
-      >
-        Show control plane
-      </button>
-      <button
-        id="terra-devices-compare-btn"
-        class="terra-btn terra-btn--inline terra-btn--outlined terra-devices-compare-btn"
-        type="button"
-      >
-        <span id="terra-devices-compare-label">Compare selected</span>
-      </button>
-      <p>
-        Reachability changes reset the “since status” clock. “Last inventory” is when TERRA last pulled this row from
-        Manager.
-      </p>
-    </div>
-    <script type="application/json" id="terra-devices-json">{{ devices_json | safe }}</script>
     <div
-      id="terra-devices-table"
-      role="grid"
-      aria-label="Synced SD-WAN devices"
+      id="terra-devices-grid-root"
       data-show-owner="{{ 'true' if show_device_owner else 'false' }}"
     ></div>
   </div>
 </div>
 {% endblock %}
 {% block extra_scripts %}
-<script src="/static/vendor/tabulator.min.js"></script>
-<script src="/static/js/terra-devices-home.js"></script>
+<script type="module" src="/static/dist/devices-grid.js"></script>
 {% endblock %}

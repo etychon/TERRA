@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 from typing import Any
@@ -9,7 +10,7 @@ from typing import Any
 import httpx
 
 from terra.inventory_extract import _pick, _row_from_interface_dict
-from terra.sdwan_dataservice_rows import rows_from_dataservice_body
+from terra_sdwan.sdwan_dataservice_rows import rows_from_dataservice_body
 
 logger = logging.getLogger(__name__)
 
@@ -96,6 +97,71 @@ def _rows_from_get(
     if body is None:
         return []
     return rows_from_dataservice_body(body)
+
+
+async def _async_rows_from_get(
+    client: httpx.AsyncClient,
+    base: str,
+    path: str,
+    device_id: str,
+    *,
+    timeout: float,
+) -> list[dict[str, Any]]:
+    url = f"{base.rstrip('/')}/{path.lstrip('/')}"
+    try:
+        r = await client.get(
+            url,
+            params={"deviceId": device_id},
+            headers={"Accept": "application/json"},
+            timeout=timeout,
+        )
+    except httpx.RequestError:
+        return []
+    if r.status_code >= 400:
+        return []
+    try:
+        body = r.json()
+    except ValueError:
+        return []
+    return rows_from_dataservice_body(body)
+
+
+async def _parallel_cellular_wan_snapshots(
+    base_url: str,
+    header_map: dict[str, str],
+    cookies: httpx.Cookies,
+    verify_tls: bool | str,
+    dev_id: str,
+    request_timeout: float,
+) -> dict[str, Any]:
+    """Fetch cellular + WAN dataservice slices concurrently (sync inventory enrich)."""
+    cellular_snapshots: dict[str, Any] = {}
+    base = base_url.rstrip("/")
+    paths: list[tuple[str, str]] = [(t, p) for t, p in _CELLULAR_PATHS[:4]] + [(t, p) for t, p in _EXTRA_PATHS]
+    limits = httpx.Limits(max_connections=32, max_keepalive_connections=16)
+    async with httpx.AsyncClient(
+        verify=verify_tls,
+        follow_redirects=True,
+        headers=header_map,
+        cookies=cookies,
+        limits=limits,
+        timeout=request_timeout,
+    ) as ac:
+
+        async def fetch_one(title: str, path: str) -> tuple[str, str, list[dict[str, Any]]]:
+            rows = await _async_rows_from_get(ac, base, path, dev_id, timeout=request_timeout)
+            return title, path, [x for x in rows if isinstance(x, dict)]
+
+        parts = await asyncio.gather(*[fetch_one(t, p) for t, p in paths])
+        for _title, path, chunk in parts:
+            if not chunk:
+                continue
+            if path in {p for _t, p in _CELLULAR_PATHS[:4]}:
+                key = f"cellular_sync_{path.replace('dataservice/', '').replace('/', '_')}"
+            else:
+                key = f"wan_sync_{path.replace('dataservice/', '').replace('/', '_')}"
+            cellular_snapshots[key] = chunk[:120]
+    return cellular_snapshots
 
 
 def interface_row_from_live_api_dict(d: dict[str, Any]) -> dict[str, str]:
@@ -247,12 +313,15 @@ def enrich_inventory_row_for_sync(
     row: dict[str, Any],
     *,
     request_timeout: float = 4.0,
+    verify_tls: bool | str | None = None,
 ) -> dict[str, Any]:
     """
     Merge per-device dataservice rows into the inventory dict before persisting ``raw_json``.
 
     Bounded: a few GETs with short timeouts so background sync stays predictable.
+    Cellular/WAN dataservice slices after ``deviceId`` is known are fetched concurrently (async).
     """
+    _verify: bool | str = True if verify_tls is None else verify_tls
     out = dict(row)
     candidates = vmanage_device_id_candidates(out)
     if not candidates:
@@ -275,16 +344,30 @@ def enrich_inventory_row_for_sync(
 
     dev = used_id or candidates[0]
     cellular_snapshots: dict[str, Any] = {}
-    for _title, path in _CELLULAR_PATHS[:4]:
-        chunk = _rows_from_get(client, base_url, path, dev, timeout=request_timeout)
-        if chunk:
-            key = f"cellular_sync_{path.replace('dataservice/', '').replace('/', '_')}"
-            cellular_snapshots[key] = chunk[:120]
-    for _title, path in _EXTRA_PATHS:
-        chunk = _rows_from_get(client, base_url, path, dev, timeout=request_timeout)
-        if chunk:
-            key = f"wan_sync_{path.replace('dataservice/', '').replace('/', '_')}"
-            cellular_snapshots[key] = chunk[:120]
+    header_map = dict(client.headers)
+    try:
+        cellular_snapshots = asyncio.run(
+            _parallel_cellular_wan_snapshots(
+                base_url,
+                header_map,
+                client.cookies,
+                _verify,
+                dev,
+                request_timeout,
+            ),
+        )
+    except (RuntimeError, OSError, httpx.RequestError, ValueError, TypeError):
+        logger.debug("SD-WAN parallel cellular/WAN enrich failed; falling back to sequential GETs", exc_info=True)
+        for _title, path in _CELLULAR_PATHS[:4]:
+            chunk = _rows_from_get(client, base_url, path, dev, timeout=request_timeout)
+            if chunk:
+                key = f"cellular_sync_{path.replace('dataservice/', '').replace('/', '_')}"
+                cellular_snapshots[key] = chunk[:120]
+        for _title, path in _EXTRA_PATHS:
+            chunk = _rows_from_get(client, base_url, path, dev, timeout=request_timeout)
+            if chunk:
+                key = f"wan_sync_{path.replace('dataservice/', '').replace('/', '_')}"
+                cellular_snapshots[key] = chunk[:120]
 
     if cellular_snapshots:
         nest = out.get("terraEnrichedFromSync")

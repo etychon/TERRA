@@ -50,6 +50,15 @@ class Settings(BaseSettings):
         le=45.0,
         description="HTTP timeout (seconds) for each per-device enrich GET during sync.",
     )
+    sdwan_sync_enrich_concurrency: int = Field(
+        default=6,
+        ge=1,
+        le=32,
+        description=(
+            "Max parallel Manager HTTP sessions used for per-device enrich during inventory sync (JWT only). "
+            "Session/cookie auth forces 1 to avoid invalidating a shared login."
+        ),
+    )
     sdwan_sync_inventory_timeout_seconds: float = Field(
         default=120.0,
         ge=10.0,
@@ -89,6 +98,56 @@ class Settings(BaseSettings):
     debug_token: str | None = Field(
         default=None,
         description="Bearer for /debug/* (header X-Terra-Debug-Token or query debug_token).",
+    )
+    victoriametrics_url: str | None = Field(
+        default=None,
+        description="VictoriaMetrics base URL (e.g. http://victoriametrics:8428) for sparse gauge import.",
+    )
+    telemetry_push_enabled: bool = Field(
+        default=True,
+        description="When True and victoriametrics_url is set, push SD-WAN sync summary metrics after each batch.",
+    )
+    cellular_history_enabled: bool = Field(
+        default=True,
+        description="After inventory sync, pull EIOLTE statistics history for cellular-capable WAN edges.",
+    )
+    cellular_history_hours: int = Field(
+        default=2,
+        ge=1,
+        le=168,
+        description="Lookback hours for incremental cellular history when a per-device cursor exists.",
+    )
+    cellular_history_backfill_hours: int = Field(
+        default=48,
+        ge=1,
+        le=168,
+        description="Lookback hours on first cellular history pull (no cursor yet).",
+    )
+    cellular_history_histogram_minutes: int = Field(
+        default=30,
+        ge=1,
+        le=120,
+        description="EIOLTE uniqueAggregation histogram bucket width in minutes.",
+    )
+    cellular_history_max_devices_per_sync: int = Field(
+        default=200,
+        ge=0,
+        le=5000,
+        description="Max cellular-capable devices polled per Manager per sync (0 = unlimited).",
+    )
+    cellular_history_http_timeout_seconds: float = Field(
+        default=45.0,
+        ge=5.0,
+        le=120.0,
+        description="HTTP timeout for each EIOLTE statistics POST.",
+    )
+    cellular_history_omit_ps_domain_filter: bool = Field(
+        default=False,
+        description="When True, omit ps_domain Attached filter from EIOLTE queries.",
+    )
+    cellular_rssi_quality_thresholds_dbm: str = Field(
+        default="-65,-75,-85",
+        description="Comma-separated RSSI (dBm) cutoffs for excellent/good/fair/poor (descending).",
     )
 
 @lru_cache

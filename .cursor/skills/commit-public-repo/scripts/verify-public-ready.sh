@@ -21,8 +21,8 @@ run_py_tool() {
 }
 
 if [[ -f pyproject.toml ]]; then
-  run_py_tool ruff check src/terra tests
-  run_py_tool mypy src/terra tests
+  run_py_tool ruff check src/terra src/terra_sdwan tests
+  run_py_tool mypy src/terra src/terra_sdwan tests
 fi
 
 if [[ -f docker-compose.yml ]] && command -v docker >/dev/null 2>&1; then

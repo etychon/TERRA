@@ -42,9 +42,19 @@ TERRA UI follows **Material Design 3** for **interaction, shape, typography, and
 - **`npm run lint`** also runs **`scripts/verify-design-contract.mjs`** for CSS and cross-file checks (e.g. forbidden hue keywords in `globals.css`).
 - **Pre-commit** invokes frontend lint when `frontend/` changes.
 
+## Devices grid (React island)
+
+- **Location:** `/devices` mounts a Vite-built bundle (`src/terra/static/dist/devices-grid.js`) on `#terra-devices-grid-root`.
+- **Column contract:** stable ids in `frontend/src/devices/columnMeta.ts` (`cluster`, `tenant`, `hostname`, `cellular`, …). Bump `terra.devicesGrid.prefs.v1` only when adding/removing column ids.
+- **Custom cells:** React components under `frontend/src/devices/cells/` (e.g. cellular sparkline + RSSI dot). Do not use HTML string formatters or table-wide `redraw()` for async graphics.
+- **Cellular sparklines:** [Datatype](https://franktisellano.github.io/datatype/) variable font (`{l:…}` ligatures) self-hosted in `static/fonts/`; `.terra-dg-datatype-spark` must set `font-feature-settings: "liga" 1, "calt" 1` and `letter-spacing: 0` (see [integration guide](https://franktisellano.github.io/datatype/integrations.html)); RSSI dBm mapped to 0–100 heights in `datatypeSparkline.ts`.
+- **Data:** `GET /api/v1/me/devices` (paginated); never embed the full fleet in Jinja JSON.
+- **Styling:** `frontend/src/devices/devices-grid.css` uses parent page semantic HSL tokens from `terra-auth.css` (`--foreground`, `--surface-container-*`, `--primary`, …). No purple/indigo; no light-theme hex fallbacks.
+
 ## Considered / discarded
 
 - **Dual parallel palettes in components (light vs dark hex in JSX)** — rejected; conflicts with shadcn-style semantic CSS variables and doubles AI error surface.
 - **JS-driven theme color computation** as the default — rejected for theme colors; class + CSS variables only for color theming.
+- **Tabulator + monolithic `terra-devices-home.js` for `/devices`** — rejected; replaced by typed React island + TanStack Table (2025) due to fragile persistence, HTML formatters, and gesture conflicts.
 
 When visual rules change, update this file in the **same PR** as token or CSS changes.

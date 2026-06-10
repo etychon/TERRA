@@ -35,7 +35,7 @@ logger = logging.getLogger(__name__)
 async def _sdwan_background_loop() -> None:
     """Periodic inventory pull — Cisco Manager has no standard push channel for full device lists."""
     from terra.config import get_settings
-    from terra.sdwan_sync import sync_all_connected_managers
+    from terra_sdwan.sdwan_sync import sync_all_connected_managers
 
     settings = get_settings()
     if not settings.sdwan_background_sync:
@@ -74,7 +74,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             task.cancel()
             with contextlib.suppress(asyncio.CancelledError):
                 await task
-        from terra.sdwan_sync_job_runner import shutdown_executor
+        from terra_sdwan.sdwan_sync_job_runner import shutdown_executor
 
         shutdown_executor()
 
@@ -127,7 +127,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 return response
             from terra.app_log_buffer import log_http_request
             from terra.db import get_session_factory
-            from terra.sdwan_operator_log import http_access_log_detail_for_path
+            from terra_sdwan.sdwan_operator_log import http_access_log_detail_for_path
 
             detail = ""
             if (

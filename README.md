@@ -36,7 +36,7 @@ The script also writes the same token to **`.run/terra-debug.token`** (mode `600
 export TERRA_DEBUG_TOKEN="$(openssl rand -hex 16)"
 export TERRA_DEBUG_API_PORT=18434
 export TERRA_DEBUG_HOST_BIND=0.0.0.0
-docker compose -f docker-compose.yml -f docker-compose.debug.yml up --build -d
+docker compose -f docker-compose.yml -f docker-compose.debug.yml up --build -d --remove-orphans
 curl -sS -H "X-Terra-Debug-Token: $TERRA_DEBUG_TOKEN" "http://127.0.0.1:${TERRA_DEBUG_API_PORT}/debug/summary"
 ```
 
@@ -56,11 +56,15 @@ Unless you set overrides in `.env` **before the first database seed**, the boots
 These match `TERRA_ADMIN_EMAIL` and `TERRA_ADMIN_PASSWORD` in `docker-compose.yml` / `.env.example`. Change them for any shared or non-local environment; the seed step only creates this user when the database has no matching admin yet.
 
 - **TLS material:** `docker/certs/` is bind-mounted into the `web` container. If `server.crt` and `server.key` are absent, a **dev self-signed** pair is generated on first start. For production or corporate PKI, place your own PEM files there (same names) before starting Compose.
-- **Stop:** `docker compose down` (add `-v` to remove the SQLite volume).
-- **Follow logs:** `docker compose logs -f web` and/or `docker compose logs -f api`.
+- **Stop:** `docker compose down` (add `-v` to remove named volumes for Postgres and VictoriaMetrics).
+- **Follow logs:** `docker compose logs -f web` and/or `docker compose logs -f core` and/or `docker compose logs -f collector`.
 - **Different HTTPS host port:** set `TERRA_HTTPS_PORT` in `.env` (default **4434** avoids common conflicts with **8000**).
 
-The dashboard **React SPA** is still evolving under `frontend/` (tokens and lint today). Compose runs the **full backend** (auth, RBAC, Jinja UI) and persists SQLite under a Docker volume. **Contributors** may still use local `pip` / `npm`; **operators and agents** default to Compose — see `LLM_CONTEXT.md` and `AGENTS.md`.
+The dashboard **React SPA** is still evolving under `frontend/` (tokens and lint today). Compose runs **`core`** (FastAPI UI/API), **`collector`** (periodic SD-WAN inventory sync + sparse metrics push), **`postgres`** (relational data), **`victoriametrics`** (time series, default **30d** retention), and **`web`** (TLS). **Contributors** may still use local `pip` / `npm`; **operators and agents** default to Compose — see `LLM_CONTEXT.md` and `AGENTS.md`.
+
+**Optional Grafana:** `docker compose --profile grafana up -d` starts Grafana on port **3000** (override with `TERRA_GRAFANA_PORT`) with a datasource wired to VictoriaMetrics.
+
+**Postgres password:** default dev password is in `docker-compose.yml` (override `TERRA_POSTGRES_PASSWORD` and matching `TERRA_DATABASE_URL` for production). See `.env.example`.
 
 ## Goals (summary)
 
@@ -73,7 +77,8 @@ The dashboard **React SPA** is still evolving under `frontend/` (tokens and lint
 
 | Path | Purpose |
 |------|---------|
-| `src/terra/` | FastAPI backend: session auth, RBAC, user admin API, Cisco-themed auth pages. |
+| `src/terra_sdwan/` | SD-WAN Manager HTTP/sync/live reads (shared by **core** and **collector**). |
+| `src/terra/` | FastAPI **`core`** app: session auth, RBAC, user admin API, Cisco-themed auth pages. |
 | `tests/` | Unit, integration, and smoke tests. |
 | `data/` | Local datasets, fixtures, and cached samples (no secrets). |
 | `notebooks/` | Exploratory analysis and prototyping. |
@@ -83,7 +88,7 @@ The dashboard **React SPA** is still evolving under `frontend/` (tokens and lint
 | `package.json` (root) | Proxies `npm run lint` / `npm run typecheck` to `frontend/` so you can run them from the repo root. |
 | `docker-compose.yml`, `docker-compose.debug.yml`, `Dockerfile` | **Canonical** full-stack bootstrap; optional **debug** overlay for `/debug/*` (default bind **0.0.0.0:18434** on the host). |
 | `scripts/launch-terra-debug.sh` | One-shot **debug Compose** (API on **18434**, not **8000**; LAN-reachable unless `TERRA_DEBUG_HOST_BIND=127.0.0.1`; writes `.run/terra-debug.token`). |
-| `docker/web/` | **HTTPS edge** (nginx TLS on **4434** → `api`). |
+| `docker/web/` | **HTTPS edge** (nginx TLS on **4434** → **`core`**). |
 | `docker/certs/` | TLS PEMs (`server.crt`, `server.key`); optional bind mount for **externally issued** certs. |
 | `frontend/` | Dashboard UI: Tailwind + shadcn-style CSS variables, token layers, ESLint design guardrails. |
 | `.cursor/skills/terra-ui-design-system/` | Cursor **SKILL** for UI work (loads design-system rules). |
@@ -123,8 +128,8 @@ Smoke checks live under `tests/` and validate that the repository and expected e
 ## Lint and type check
 
 ```bash
-ruff check src/terra tests
-mypy src/terra tests
+ruff check src/terra src/terra_sdwan tests
+mypy src/terra src/terra_sdwan tests
 ```
 
 ## Frontend (design system + guardrails)
@@ -133,10 +138,12 @@ This repo uses **npm workspaces** (`frontend/` is a workspace). From the **repo 
 
 ```bash
 npm install
+npm run build:devices-grid   # required for /devices when not using Docker Compose
 npm run lint
+npm run test:frontend
 ```
 
-(`npm run lint` runs `tsc`, ESLint, and the design contract script on the workspace package. Use `npm run typecheck` only if you want TypeScript alone.)
+(`npm run lint` runs `tsc`, ESLint, and the design contract script on the workspace package. Use `npm run typecheck` only if you want TypeScript alone. The devices grid bundle is built into `src/terra/static/dist/`; Compose and the `Dockerfile` run this step automatically.)
 
 Authoritative UI rules: `specs/design-system.md`. TypeScript tokens live in `frontend/src/tokens/` (`primitives.ts` → `semantic.ts` → `components.ts`); theme colors are **CSS custom properties** in `frontend/src/styles/globals.css` (`:root` / `.dark`).
 
@@ -148,6 +155,8 @@ The FastAPI app lives under `src/terra`. **Prefer running via Docker Compose** (
 terra-serve
 # or: uvicorn terra.main:app --reload --host 127.0.0.1 --port 8000
 ```
+
+The periodic SD-WAN inventory loop is **`terra-collector`** (`python -m terra.collector` or the `terra-collector` console script) when you want parity with Compose without running the full stack; it respects `TERRA_SDWAN_BACKGROUND_SYNC` (defaults **true** unless your `.env` sets it false, as in `tests/conftest.py`).
 
 - **Web UI:** `/auth/login` (Cisco-aligned dark theme via `src/terra/static/css/terra-auth.css`), `/` when signed in.
 - **JSON API:** `/api/v1/auth/*` (login, logout, forgot/reset, verify, `me`) and `/api/v1/admin/users*` for admin CRUD, roles, and bulk updates (public **register** is disabled; admins create users).

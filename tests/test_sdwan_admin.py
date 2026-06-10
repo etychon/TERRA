@@ -17,8 +17,8 @@ from sqlalchemy.orm import Session
 from terra.db import get_session_factory
 from terra.main import app
 from terra.models import SdWanAuthMode, SdWanLinkStatus, SdWanManagerInstance, User
-from terra.sdwan_client import ProbeResult
 from terra.secret_store import encrypt_json
+from terra_sdwan.sdwan_client import ProbeResult
 
 
 def _dummy_jwt() -> str:
@@ -208,10 +208,10 @@ def test_sync_single_sdwan_multitenant_empty_inventory_error_detail(
     assert client.post("/api/v1/auth/login", json={"email": email, "password": password}).status_code == 200
 
     monkeypatch.setattr(
-        "terra.sdwan_sync._gather_inventory_with_tenant_scopes",
+        "terra_sdwan.sdwan_sync._gather_inventory_with_tenant_scopes",
         lambda _c, _u, **_kw: ([], True),
     )
-    monkeypatch.setattr("terra.sdwan_sync.read_manager_version", lambda _c, _u, **_kw: None)
+    monkeypatch.setattr("terra_sdwan.sdwan_sync.read_manager_version", lambda _c, _u, **_kw: None)
 
     sf = get_session_factory()
     with sf() as db:

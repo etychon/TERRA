@@ -95,6 +95,28 @@ def _sqlite_add_missing_columns(engine: Engine) -> None:
             )
             logger.info("Applied SQLite patch: sdwan_manager_instances.credential_scope_detail")
 
+        dev_exists = conn.execute(
+            text("SELECT 1 FROM sqlite_master WHERE type='table' AND name='synced_devices'")
+        ).scalar()
+        if dev_exists is not None:
+            dev_cols = {row[1] for row in conn.execute(text("PRAGMA table_info(synced_devices)")).fetchall()}
+            if "cellular_stats_cursor" not in dev_cols:
+                conn.execute(text("ALTER TABLE synced_devices ADD COLUMN cellular_stats_cursor TEXT"))
+                logger.info("Applied SQLite patch: synced_devices.cellular_stats_cursor")
+
+
+def _postgres_add_missing_columns(engine: Engine) -> None:
+    """Lightweight ALTER for Postgres deployments (create_all does not migrate)."""
+    url = str(engine.url)
+    if not url.startswith("postgresql"):
+        return
+    with engine.begin() as conn:
+        conn.execute(
+            text(
+                "ALTER TABLE synced_devices ADD COLUMN IF NOT EXISTS cellular_stats_cursor TEXT"
+            )
+        )
+
 
 def _sqlite_migrate_synced_devices_multitenant(engine: Engine) -> None:
     """
@@ -167,6 +189,7 @@ def init_db() -> None:
     Base.metadata.create_all(bind=eng)
     _sqlite_add_missing_columns(eng)
     _sqlite_migrate_synced_devices_multitenant(eng)
+    _postgres_add_missing_columns(eng)
     seed_rbac()
 
 

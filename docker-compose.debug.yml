@@ -5,7 +5,7 @@
 # Requires a shared debug token (header X-Terra-Debug-Token or ?debug_token=).
 #
 #   export TERRA_DEBUG_TOKEN="$(openssl rand -hex 16)"
-#   docker compose -f docker-compose.yml -f docker-compose.debug.yml up --build -d
+#   docker compose -f docker-compose.yml -f docker-compose.debug.yml up --build -d --remove-orphans
 #
 # Examples:
 #   ./scripts/launch-terra-debug.sh
@@ -13,7 +13,7 @@
 #   curl ... "http://$(hostname -I | awk '{print $1}'):${TERRA_DEBUG_API_PORT:-18434}/debug/summary" | jq .
 #
 services:
-  api:
+  core:
     environment:
       TERRA_DEBUG_EXPOSE_INTERNALS: "true"
       TERRA_DEBUG_TOKEN: ${TERRA_DEBUG_TOKEN:-local-debug-token-change-me}

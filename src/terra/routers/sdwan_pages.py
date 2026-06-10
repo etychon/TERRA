@@ -26,7 +26,8 @@ from terra.db import get_db
 from terra.deps import ensure_csrf, get_current_user, require_csrf, user_is_admin
 from terra.inventory_extract import utc_iso_for_json
 from terra.models import SdWanAuthMode, SdWanLinkStatus, SdWanManagerInstance, User
-from terra.sdwan_client import (
+from terra.secret_store import decrypt_json, encrypt_json
+from terra_sdwan.sdwan_client import (
     ProbeResult,
     jwt_expires_at,
     normalize_manager_base_url,
@@ -34,9 +35,8 @@ from terra.sdwan_client import (
     probe_jwt,
     probe_session,
 )
-from terra.sdwan_credential_scope import credential_scope_public_label, detect_credential_scope
-from terra.sdwan_http import open_manager_http_client
-from terra.secret_store import decrypt_json, encrypt_json
+from terra_sdwan.sdwan_credential_scope import credential_scope_public_label, detect_credential_scope
+from terra_sdwan.sdwan_http import open_manager_http_client
 
 logger = logging.getLogger(__name__)
 

@@ -8,6 +8,12 @@
   },
   "scripts": {
     "lint": "npm run lint -w terra-dashboard-frontend",
-    "typecheck": "npm run typecheck -w terra-dashboard-frontend"
+    "typecheck": "npm run typecheck -w terra-dashboard-frontend",
+    "build:devices-grid": "npm run build -w terra-dashboard-frontend",
+    "test:frontend": "npm run test -w terra-dashboard-frontend",
+    "test:e2e": "playwright test -c e2e/playwright.config.ts"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.49.1"
   }
 }

@@ -708,6 +708,46 @@ _CELL_HINT = re.compile(
     re.I,
 )
 
+_CELLULAR_MODEL_HINT = re.compile(
+    r"(IR11\d|IR8\d{2}|IR8140|1833|C819|C829|LTE|CELL)",
+    re.I,
+)
+
+
+def system_ip_from_inventory(parsed: dict[str, Any]) -> str | None:
+    """System IP for EIOLTE ``vdevice_name`` (prefer ``system-ip`` over uuid)."""
+    from terra_sdwan.sdwan_device_live import vmanage_device_id_candidates
+
+    for key in ("system-ip", "systemIp", "deviceIp", "local-system-ip"):
+        v = parsed.get(key)
+        if isinstance(v, str) and v.strip():
+            return v.strip()
+    cands = vmanage_device_id_candidates(parsed)
+    return cands[0] if cands else None
+
+
+def device_has_cellular_capability(
+    parsed: dict[str, Any],
+    *,
+    model: str = "",
+    hostname: str = "",
+) -> bool:
+    """True when inventory suggests a cellular modem (enrichment, interfaces, or model hint)."""
+    enriched = parsed.get("terraEnrichedFromSync")
+    if isinstance(enriched, dict):
+        for k in enriched:
+            lk = str(k).lower()
+            if "cellular" in lk or lk.startswith("cellular_sync_"):
+                return True
+    for row in extract_interface_rows(parsed):
+        ifname = (row.get("interface") or row.get("ifname") or "").strip()
+        if ifname and _CELL_HINT.search(ifname):
+            return True
+    combined = f"{model} {hostname}"
+    if combined.strip() and _CELLULAR_MODEL_HINT.search(combined):
+        return True
+    return bool(extract_cellular_kv(parsed))
+
 
 def extract_cellular_kv(parsed: dict[str, Any]) -> list[dict[str, str]]:
     """Key/value pairs for cellular / LTE / signal-like fields (flattened, capped)."""
@@ -740,6 +780,107 @@ def extract_cellular_kv(parsed: dict[str, Any]) -> list[dict[str, str]]:
 
     walk(parsed, "", 0)
     return out
+
+
+def model_serial_from_chassis_id(token: str) -> tuple[str, str]:
+    """
+    Split Cisco chassis-style ids (e.g. ``IR1101-K9-FCW2252003R``) into model + serial.
+
+    Model is all hyphen segments except the last; serial is the final segment.
+    """
+    s = (token or "").strip()
+    if not s or "-" not in s:
+        return "", ""
+    parts = [p for p in s.split("-") if p]
+    if len(parts) < 2:
+        return "", ""
+    return "-".join(parts[:-1]), parts[-1]
+
+
+def _chassis_id_tokens(parsed: dict[str, Any], source_uuid: str) -> list[str]:
+    out: list[str] = []
+    for key in ("chasisNumber", "chassisNumber", "uuid", "deviceId", "ncsDeviceName"):
+        v = parsed.get(key)
+        if isinstance(v, str) and v.strip():
+            out.append(v.strip())
+    su = (source_uuid or "").strip()
+    if su and su not in out:
+        out.append(su)
+    return out
+
+
+def display_inventory_serial(stored: str, parsed: dict[str, Any], *, source_uuid: str = "") -> str:
+    """Serial for grids: chassis tail (``FCW…``) when uuid/chassis encodes model+serial."""
+    stored_s = (stored or "").strip()
+    for tok in _chassis_id_tokens(parsed, source_uuid):
+        _model, serial = model_serial_from_chassis_id(tok)
+        if serial and (not stored_s or stored_s == tok):
+            return serial
+    if stored_s:
+        _model, from_stored = model_serial_from_chassis_id(stored_s)
+        if from_stored and stored_s.count("-") >= 2:
+            return from_stored
+        return stored_s
+    from_raw = deep_find_serial(parsed)
+    if from_raw:
+        return from_raw
+    return ""
+
+
+def display_inventory_model(stored: str, parsed: dict[str, Any], *, source_uuid: str = "") -> str:
+    """Device model/SKU for grids (chassis prefix from uuid, then Manager model fields)."""
+    for tok in _chassis_id_tokens(parsed, source_uuid):
+        model, _serial = model_serial_from_chassis_id(tok)
+        if model:
+            return model
+    for key in (
+        "deviceModel",
+        "device-model",
+        "hardwareModel",
+        "vedgeModel",
+        "pid",
+        "PID",
+        "productId",
+        "ncsDeviceType",
+    ):
+        v = _scalar_to_str(parsed.get(key))
+        if v:
+            return v
+    stored_s = (stored or "").strip()
+    if stored_s and stored_s.count("-") < 2:
+        return stored_s
+    return stored_s
+
+
+def display_ios_xe_release(stored: str, parsed: dict[str, Any] | None = None) -> str:
+    """
+    IOS-XE release label for UI (e.g. ``17.16.01a.0.1625`` → ``17.16.01a``).
+    """
+    candidates: list[str] = []
+    if parsed:
+        for key in ("version", "softwareVersion", "software_version", "vedgeVersion"):
+            v = _scalar_to_str(parsed.get(key))
+            if v:
+                candidates.append(v)
+    if stored and stored.strip():
+        candidates.append(stored.strip())
+    for raw in candidates:
+        parts = raw.split(".")
+        if len(parts) >= 3 and parts[0].isdigit():
+            return ".".join(parts[:3])
+        m = re.match(r"^(\d+\.\d+\.\d+[a-z]?)", raw, re.IGNORECASE)
+        if m:
+            return m.group(1)
+    return candidates[0] if candidates else ""
+
+
+def display_site_name(stored_site: str | None, parsed: dict[str, Any]) -> str:
+    """Prefer Manager ``site-name`` over numeric ``site-id`` stored in the DB column."""
+    for key in ("site-name", "siteName", "site_name"):
+        v = _scalar_to_str(parsed.get(key))
+        if v:
+            return v
+    return (stored_site or "").strip()
 
 
 def display_serial(stored: str, parsed: dict[str, Any]) -> str:

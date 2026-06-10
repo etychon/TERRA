@@ -13,8 +13,8 @@ from urllib.parse import urlparse
 
 import httpx
 
-from terra.sdwan_dataservice_rows import rows_from_dataservice_body
 from terra.secret_store import decrypt_json
+from terra_sdwan.sdwan_dataservice_rows import rows_from_dataservice_body
 
 logger = logging.getLogger(__name__)
 

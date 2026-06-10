@@ -139,6 +139,8 @@ class SyncedDevice(Base):
     state_changed_at_utc: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     synced_at_utc: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     raw_json: Mapped[str] = mapped_column(Text, nullable=False, default="{}")
+    #: JSON map ``slot:active_sim`` → max ingested EIOLTE ``entry_time`` (epoch ms) for incremental history.
+    cellular_stats_cursor: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     instance: Mapped[SdWanManagerInstance] = relationship(back_populates="synced_devices")
 

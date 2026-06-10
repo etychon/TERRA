@@ -40,7 +40,7 @@ else
   echo "launch-terra-debug: using TERRA_DEBUG_TOKEN from the environment."
 fi
 
-# Persist for local agents / scripts (gitignored); same value the api container receives on next `up`.
+# Persist for local agents / scripts (gitignored); same value the core container receives on next `up`.
 RUN_DIR="$ROOT/.run"
 mkdir -p "$RUN_DIR"
 printf '%s\n' "$TERRA_DEBUG_TOKEN" >"$RUN_DIR/terra-debug.token"
@@ -62,11 +62,12 @@ for arg in "$@"; do
 done
 
 if $detach; then
-  "${COMPOSE[@]}" up --build -d "${compose_args[@]}"
+  # After renames (e.g. api → core), an old container may still publish TERRA_DEBUG_API_PORT; orphans are not in the current compose file.
+  "${COMPOSE[@]}" up --build -d --remove-orphans "${compose_args[@]}"
   echo ""
   echo "launch-terra-debug: stack is up (detached)."
 else
-  exec "${COMPOSE[@]}" up --build "${compose_args[@]}"
+  exec "${COMPOSE[@]}" up --build --remove-orphans "${compose_args[@]}"
 fi
 
 echo ""
@@ -77,4 +78,4 @@ if [[ "${TERRA_DEBUG_HOST_BIND}" != "127.0.0.1" ]]; then
 fi
 echo "Example:"
 echo "  curl -sS -H \"X-Terra-Debug-Token: \${TERRA_DEBUG_TOKEN}\" \"http://127.0.0.1:${TERRA_DEBUG_API_PORT}/debug/summary\""
-echo "Logs: docker compose -f docker-compose.yml -f docker-compose.debug.yml logs -f api"
+echo "Logs: docker compose -f docker-compose.yml -f docker-compose.debug.yml logs -f core"
