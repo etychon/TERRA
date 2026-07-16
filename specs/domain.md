@@ -11,7 +11,7 @@
 ## User journeys (MVP bias)
 
 1. **Morning check:** fleet health, red/yellow/green, version outliers, SIM-heavy sites.
-2. **Incident:** drill into **cellular** stats, recent **events**, **alerts**, last known **GPS**.
+2. **Incident:** drill into **cellular** stats, recent **alarms/events** (Events page + device detail panel), **alerts**, last known **GPS**.
 3. **Compliance / audit:** who acknowledged what, export for operations review.
 
 ## Reporting

@@ -14,11 +14,29 @@
   <div class="terra-card-inner">
     <h1 class="terra-page-title">Application logs</h1>
     <p class="terra-lead">
-      Live, in-memory log stream for operators (timestamps use your browser timezone).
-      <strong>Newest entries appear at the top.</strong> Polling pauses noisy endpoints; SD-WAN sync uses a separate job
-      API. Search supports <code class="terra-code">*</code> and <code class="terra-code">?</code> wildcards (matches
+      Live log stream for operators (timestamps use your browser timezone).
+      <strong>Newest entries appear at the top.</strong> Periodic SD-WAN batch lines come from the
+      <strong>collector</strong> service via Postgres; HTTP and on-demand sync jobs stay in the core process memory buffer.
+      Search supports <code class="terra-code">*</code> and <code class="terra-code">?</code> wildcards (matches
       component, message, and detail).
     </p>
+    <div id="terra-collector-status" class="terra-collector-status" aria-live="polite">
+      <div class="terra-collector-status-head">
+        <span class="terra-collector-status-title">Background collector</span>
+        <span id="terra-collector-state" class="terra-chip terra-chip--muted">Loading…</span>
+      </div>
+      <dl class="terra-collector-status-grid" id="terra-collector-status-grid">
+        <div><dt>Last heartbeat</dt><dd id="terra-collector-heartbeat">—</dd></div>
+        <div><dt>Interval</dt><dd id="terra-collector-interval">—</dd></div>
+        <div><dt>Last batch</dt><dd id="terra-collector-batch">—</dd></div>
+        <div><dt>Cellular buckets</dt><dd id="terra-collector-cellular">—</dd></div>
+      </dl>
+      <p class="terra-collector-status-hint">
+        <button type="button" class="terra-btn terra-btn--inline terra-btn--outlined terra-collector-filter-btn" id="terra-collector-filter-btn">
+          Show batch logs
+        </button>
+      </p>
+    </div>
     <div class="terra-logs-toolbar">
       <label class="terra-logs-search">
         <span class="terra-logs-search-label">Search</span>

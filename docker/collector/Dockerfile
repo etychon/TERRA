@@ -13,10 +13,11 @@ RUN apt-get update \
 
 COPY pyproject.toml README.md /app/
 COPY src/ /app/src/
+COPY scripts/ /app/scripts/
 
 RUN pip install --no-cache-dir --upgrade pip \
     && pip install --no-cache-dir .
 
 ENV TERRA_SDWAN_BACKGROUND_SYNC=true
 
-CMD ["python", "-m", "terra.collector"]
+CMD ["terra-collector"]

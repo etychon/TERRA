@@ -192,6 +192,53 @@ def install_ring_buffer_logging(*, buffer_maxlen: int = 3000) -> None:
     log.addHandler(h)
 
 
+def query_entries_merged(
+    *,
+    since_seq: int = 0,
+    since_db_id: int = 0,
+    limit: int = 200,
+    pattern: str | None = None,
+) -> tuple[list[dict[str, Any]], int, int]:
+    """
+    Merge in-memory ring buffer with persisted ``app_log_events`` (newest-first).
+
+    Returns ``(entries, tail_seq, tail_db_id)``.
+    """
+    from terra.collector_status import query_persisted_log_events, search_persisted_log_events
+
+    lim = max(1, min(int(limit), 500))
+    if pattern and pattern.strip():
+        mem_rows, tail_seq = search_entries(pattern.strip(), limit=lim)
+        db_rows, tail_db = search_persisted_log_events(pattern.strip(), limit=lim)
+    else:
+        mem_rows, tail_seq = query_entries(since_seq=max(0, int(since_seq)), limit=lim, pattern=None)
+        db_rows, tail_db = query_persisted_log_events(since_id=max(0, int(since_db_id)), limit=lim)
+
+    seen: set[str] = set()
+    merged: list[dict[str, Any]] = []
+    dropped = 0
+
+    def _key(row: dict[str, Any]) -> str:
+        if row.get("db_id") is not None:
+            return f"db:{row['db_id']}"
+        return f"mem:{row.get('seq', 0)}"
+
+    for row in mem_rows + db_rows:
+        k = _key(row)
+        if k in seen:
+            dropped += 1
+            continue
+        seen.add(k)
+        merged.append(row)
+
+    merged.sort(key=lambda r: (str(r.get("ts", "")), int(r.get("seq", 0))), reverse=True)
+    return merged[:lim], tail_seq, tail_db
+
+
+def search_entries_merged(pattern: str, *, limit: int = 500) -> tuple[list[dict[str, Any]], int, int]:
+    return query_entries_merged(since_seq=0, since_db_id=0, limit=limit, pattern=pattern)
+
+
 def log_http_request(*, method: str, path: str, status_code: int, detail: str = "") -> None:
     """Structured HTTP line for the Logs UI (component ``http``)."""
     m = (method or "?")[:16].upper()

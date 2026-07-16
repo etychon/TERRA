@@ -65,6 +65,7 @@ services:
       context: .
       dockerfile: docker/collector/Dockerfile
     image: terra-sdwan-dashboard-collector:local
+    restart: unless-stopped
     environment:
       TERRA_SECRET_KEY: ${TERRA_SECRET_KEY:-compose-default-dev-secret-32chars!!}
       TERRA_ADMIN_EMAIL: ${TERRA_ADMIN_EMAIL:-admin@terra.local}
@@ -72,6 +73,7 @@ services:
       TERRA_DATABASE_URL: postgresql+psycopg://${TERRA_POSTGRES_USER:-terra}:${TERRA_POSTGRES_PASSWORD:-terradb-dev-password}@postgres:5432/${TERRA_POSTGRES_DB:-terra}
       TERRA_MAIL_MODE: ${TERRA_MAIL_MODE:-log}
       TERRA_SDWAN_BACKGROUND_SYNC: "true"
+      TERRA_GOVERNANCE_SYNC_ENABLED: ${TERRA_GOVERNANCE_SYNC_ENABLED:-true}
       TERRA_VICTORIAMETRICS_URL: http://victoriametrics:8428
       TERRA_TELEMETRY_PUSH_ENABLED: ${TERRA_TELEMETRY_PUSH_ENABLED:-true}
     depends_on:
@@ -83,7 +85,7 @@ services:
       test:
         [
           "CMD-SHELL",
-          "python -c \"from terra.config import get_settings; from sqlalchemy import create_engine, text; e=create_engine(get_settings().database_url); c=e.connect(); c.execute(text('SELECT 1')); c.close()\"",
+          "python scripts/collector_healthcheck.py",
         ]
       interval: 30s
       timeout: 10s

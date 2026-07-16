@@ -12,10 +12,13 @@ export default defineConfig({
     outDir: path.resolve(here, "../src/terra/static/dist"),
     emptyOutDir: true,
     rollupOptions: {
-      input: path.resolve(here, "src/devices/main.tsx"),
+      input: {
+        "devices-grid": path.resolve(here, "src/devices/main.tsx"),
+        "events-grid": path.resolve(here, "src/events/main.tsx"),
+      },
       output: {
-        entryFileNames: "devices-grid.js",
-        assetFileNames: "devices-grid.[ext]",
+        entryFileNames: "[name].js",
+        assetFileNames: "[name][extname]",
       },
     },
   },

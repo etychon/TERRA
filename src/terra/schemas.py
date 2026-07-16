@@ -118,7 +118,7 @@ class SyncJobCancelResponse(BaseModel):
 
 
 class AppLogItem(BaseModel):
-    """One in-memory application log row (admin Logs UI)."""
+    """One application log row (in-memory ring buffer or persisted collector events)."""
 
     seq: int
     ts: str
@@ -127,11 +127,45 @@ class AppLogItem(BaseModel):
     message: str
     detail: str = ""
     http_status: int | None = None
+    source: str = "memory"
+    db_id: int | None = None
 
 
 class AppLogFeedResponse(BaseModel):
     entries: list[AppLogItem]
     tail_seq: int
+    tail_db_id: int = 0
+
+
+class CollectorBatchSummary(BaseModel):
+    run_id: str | None = None
+    started_at_utc: str | None = None
+    finished_at_utc: str | None = None
+    kind: str | None = None
+    managers: int | None = None
+    ok: int | None = None
+    warn: int | None = None
+    err: int | None = None
+    rows: int | None = None
+    wall_ms: int | None = None
+    cellular_buckets: int | None = None
+    cellular_errors: int | None = None
+
+
+class CollectorEnvHints(BaseModel):
+    sdwan_background_sync: bool
+    cellular_history_enabled: bool
+    telemetry_push_enabled: bool
+
+
+class CollectorStatusResponse(BaseModel):
+    state: str
+    service_name: str
+    last_heartbeat_at_utc: str | None = None
+    interval_seconds: int
+    last_error: str | None = None
+    last_batch: CollectorBatchSummary
+    env: CollectorEnvHints
 
 
 class MapDeviceTelemetryItem(BaseModel):
@@ -250,3 +284,50 @@ class DevicesListResponse(BaseModel):
     total: int = 0
     limit: int = 50
     offset: int = 0
+
+
+class GovernanceEventRow(BaseModel):
+    """One normalized alarm/event/audit row for grid or device panel."""
+
+    id: int
+    stream_kind: str
+    entry_time_utc: str
+    severity_raw: str = ""
+    severity_norm: str = "unknown"
+    active: bool | None = None
+    cluster: str = "—"
+    tenant: str = "—"
+    sdwan_instance_id: int
+    device_id: int | None = None
+    device_hostname: str = "—"
+    system_ip: str = "—"
+    site_id: str = "—"
+    title: str = ""
+    summary: str = ""
+    component: str = "—"
+    rule_name: str = "—"
+    loguser: str = "—"
+    logfeature: str = "—"
+    degraded: bool = False
+
+
+class GovernanceEventsListResponse(BaseModel):
+    items: list[GovernanceEventRow] = Field(default_factory=list)
+    total: int = 0
+    limit: int = 50
+    offset: int = 0
+
+
+class GovernanceClusterFacet(BaseModel):
+    id: int
+    display_name: str
+
+
+class GovernanceEventsFacets(BaseModel):
+    severities: list[str] = Field(default_factory=list)
+    streams: list[str] = Field(default_factory=list)
+    clusters: list[GovernanceClusterFacet] = Field(default_factory=list)
+
+
+class GovernanceEventDetail(GovernanceEventRow):
+    raw_json: dict[str, object] | str = Field(default_factory=dict)

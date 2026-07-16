@@ -1,0 +1,31 @@
+{% extends "base.html" %}
+{% block extra_head %}
+<link rel="stylesheet" href="/static/css/terra-devices.css" />
+<link rel="stylesheet" href="/static/css/terra-events.css" />
+<link rel="stylesheet" href="/static/dist/events-grid.css" />
+{% endblock %}
+{% block header_nav %}
+<span class="terra-header-user" title="{{ user.email }}">{{ user.email }}</span>
+{% if is_admin %}
+<a href="/admin/users">User management</a>
+{% endif %}
+<a href="/docs">API docs</a>
+<a href="/auth/logout">Sign out</a>
+{% endblock %}
+{% block content %}
+<div class="terra-card terra-card-wide">
+  <div class="terra-card-accent" aria-hidden="true"></div>
+  <div class="terra-card-inner">
+    <h1 class="terra-page-title">Alarms, events &amp; audit</h1>
+    <p class="terra-muted terra-detail-hint">
+      Read-only projection from Cisco Catalyst SD-WAN Manager (<strong>alarms</strong>, <strong>events</strong>,
+      <strong>audit</strong>). The background collector ingests on a timer — this page does not poll Manager directly.
+      Use filters to focus on severity, stream type, cluster, or device.
+    </p>
+    <div id="terra-events-grid-root"></div>
+  </div>
+</div>
+{% endblock %}
+{% block extra_scripts %}
+<script type="module" src="/static/dist/events-grid.js"></script>
+{% endblock %}

@@ -321,6 +321,14 @@ def _is_wan_edge_row(device_type: str) -> bool:
     return dt == "vedge" or "edge" in dt
 
 
+@dataclass(frozen=True, slots=True)
+class CellularDeviceWork:
+    device_id: int
+    tenant_id: str
+    raw_json: str
+    cellular_stats_cursor: str | None
+
+
 def sync_cellular_history_for_instance(
     db: Session,
     secret_key: str,
@@ -348,7 +356,7 @@ def sync_cellular_history_for_instance(
             select(SyncedDevice).where(SyncedDevice.sdwan_instance_id == inst.id).order_by(SyncedDevice.id)
         )
     )
-    candidates: list[SyncedDevice] = []
+    work_items: list[CellularDeviceWork] = []
     for d in rows:
         if not _is_wan_edge_row(d.device_type):
             continue
@@ -362,29 +370,38 @@ def sync_cellular_history_for_instance(
             continue
         if not system_ip_from_inventory(parsed):
             continue
-        candidates.append(d)
+        work_items.append(
+            CellularDeviceWork(
+                device_id=int(d.id),
+                tenant_id=(d.sdwan_tenant_id or "").strip(),
+                raw_json=d.raw_json,
+                cellular_stats_cursor=d.cellular_stats_cursor,
+            )
+        )
 
-    stats["devices_seen"] = len(candidates)
-    if not candidates:
+    stats["devices_seen"] = len(work_items)
+    if not work_items:
         return stats
 
     max_devices = max(0, settings.cellular_history_max_devices_per_sync)
     timeout = settings.cellular_history_http_timeout_seconds
     hist_min = settings.cellular_history_histogram_minutes
     omit_ps = settings.cellular_history_omit_ps_domain_filter
-    if max_devices and len(candidates) > max_devices:
-        candidates = candidates[:max_devices]
+    if max_devices and len(work_items) > max_devices:
+        work_items = work_items[:max_devices]
 
     cluster = (inst.display_name or "").strip() or f"id:{inst.id}"
     manager_id = str(inst.id)
 
-    by_tenant: dict[str, list[SyncedDevice]] = {}
-    for d in candidates:
-        tid = (d.sdwan_tenant_id or "").strip()
-        by_tenant.setdefault(tid, []).append(d)
+    by_tenant: dict[str, list[CellularDeviceWork]] = {}
+    for item in work_items:
+        by_tenant.setdefault(item.tenant_id, []).append(item)
 
     all_samples: list[tuple[str, dict[str, str], float, int]] = []
-    device_updates: list[tuple[SyncedDevice, str]] = []
+    device_updates: list[tuple[int, str]] = []
+
+    # Release row locks before slow Manager HTTP (collector must not block UI reads).
+    db.commit()
 
     try:
         with open_manager_http_client(secret_key, inst) as client:
@@ -411,9 +428,9 @@ def sync_cellular_history_for_instance(
                         stats["errors"] += len(group)
                         continue
 
-                for device in group:
+                for item in group:
                     try:
-                        parsed = json.loads(device.raw_json)
+                        parsed = json.loads(item.raw_json)
                         if not isinstance(parsed, dict):
                             parsed = {}
                     except json.JSONDecodeError:
@@ -422,7 +439,7 @@ def sync_cellular_history_for_instance(
                     if not system_ip:
                         continue
 
-                    cursor = load_cellular_stats_cursor(device.cellular_stats_cursor)
+                    cursor = load_cellular_stats_cursor(item.cellular_stats_cursor)
                     hours = (
                         settings.cellular_history_hours
                         if cursor
@@ -452,12 +469,12 @@ def sync_cellular_history_for_instance(
                             buckets=buckets,
                             manager_id=manager_id,
                             cluster=cluster,
-                            device_id=device.id,
-                            device_uuid=device.source_device_uuid,
+                            device_id=item.device_id,
+                            device_uuid=str(parsed.get("uuid") or parsed.get("deviceId") or item.device_id),
                         )
                     )
                     stats["buckets_pushed"] += len(buckets)
-                    device_updates.append((device, save_cellular_stats_cursor(new_cursor)))
+                    device_updates.append((item.device_id, save_cellular_stats_cursor(new_cursor)))
     except (ValueError, OSError, RuntimeError, httpx.RequestError) as e:
         logger.warning("Cellular history sync failed instance=%s: %s", inst.id, e)
         stats["errors"] += 1
@@ -466,8 +483,128 @@ def sync_cellular_history_for_instance(
     if all_samples:
         push_cellular_samples(samples=all_samples)
 
-    for device, cursor_json in device_updates:
-        device.cellular_stats_cursor = cursor_json
-        db.add(device)
+    for device_id, cursor_json in device_updates:
+        device = db.get(SyncedDevice, device_id)
+        if device is not None:
+            device.cellular_stats_cursor = cursor_json
+            db.add(device)
+
+    return stats
+
+
+def sync_cellular_history_for_device(
+    db: Session,
+    secret_key: str,
+    inst: SdWanManagerInstance,
+    device: SyncedDevice,
+) -> dict[str, Any]:
+    """Pull EIOLTE history for one cellular-capable device; returns summary counters."""
+    settings = get_settings()
+    stats: dict[str, Any] = {
+        "devices_seen": 0,
+        "devices_fetched": 0,
+        "buckets_pushed": 0,
+        "errors": 0,
+    }
+    if not settings.cellular_history_enabled:
+        return stats
+    if not settings.telemetry_push_enabled or not (settings.victoriametrics_url or "").strip():
+        return stats
+    if not _is_wan_edge_row(device.device_type):
+        return stats
+    try:
+        parsed: dict[str, Any] = json.loads(device.raw_json)
+        if not isinstance(parsed, dict):
+            parsed = {}
+    except json.JSONDecodeError:
+        parsed = {}
+    if not device_has_cellular_capability(parsed, model=device.model, hostname=device.hostname):
+        return stats
+    if not system_ip_from_inventory(parsed):
+        return stats
+
+    work = CellularDeviceWork(
+        device_id=int(device.id),
+        tenant_id=(device.sdwan_tenant_id or "").strip(),
+        raw_json=device.raw_json,
+        cellular_stats_cursor=device.cellular_stats_cursor,
+    )
+    stats["devices_seen"] = 1
+
+    timeout = settings.cellular_history_http_timeout_seconds
+    hist_min = settings.cellular_history_histogram_minutes
+    omit_ps = settings.cellular_history_omit_ps_domain_filter
+    cluster = (inst.display_name or "").strip() or f"id:{inst.id}"
+    manager_id = str(inst.id)
+
+    db.commit()
+
+    all_samples: list[tuple[str, dict[str, str], float, int]] = []
+    device_updates: list[tuple[int, str]] = []
+
+    try:
+        with open_manager_http_client(secret_key, inst) as client:
+            base = inst.base_url.rstrip("/")
+            refresh_sdwan_dataservice_csrf_header(client, base)
+            tenant_id = work.tenant_id
+            if tenant_id:
+                refresh_sdwan_dataservice_csrf_header(client, base)
+                switch_tenant(
+                    client,
+                    base,
+                    tenant_id,
+                    request_timeout=settings.sdwan_sync_inventory_timeout_seconds,
+                )
+            system_ip = system_ip_from_inventory(parsed)
+            if not system_ip:
+                return stats
+            cursor = load_cellular_stats_cursor(work.cellular_stats_cursor)
+            hours = (
+                settings.cellular_history_hours if cursor else settings.cellular_history_backfill_hours
+            )
+            body = build_eiolte_unique_aggregation_body(
+                system_ip,
+                hours,
+                histogram_minutes=hist_min,
+                omit_ps_domain=omit_ps,
+            )
+            status, payload = post_eiolte_history(client, base, body, timeout=timeout)
+            if status >= 400 or payload is None:
+                stats["errors"] += 1
+                return stats
+            stats["devices_fetched"] += 1
+            buckets = dedupe_buckets(parse_eiolte_buckets(payload))
+            buckets = filter_buckets_after_cursor(buckets, cursor)
+            if buckets:
+                new_cursor = merge_buckets_into_cursor(cursor, buckets)
+                all_samples.extend(
+                    buckets_to_vm_samples(
+                        buckets=buckets,
+                        manager_id=manager_id,
+                        cluster=cluster,
+                        device_id=work.device_id,
+                        device_uuid=str(parsed.get("uuid") or parsed.get("deviceId") or work.device_id),
+                    )
+                )
+                stats["buckets_pushed"] += len(buckets)
+                device_updates.append((work.device_id, save_cellular_stats_cursor(new_cursor)))
+    except (ValueError, OSError, RuntimeError, httpx.RequestError) as e:
+        logger.warning(
+            "Cellular history sync failed instance=%s device=%s: %s",
+            inst.id,
+            device.id,
+            e,
+        )
+        stats["errors"] += 1
+        return stats
+
+    if all_samples:
+        push_cellular_samples(samples=all_samples)
+
+    for device_id, cursor_json in device_updates:
+        row = db.get(SyncedDevice, device_id)
+        if row is not None:
+            row.cellular_stats_cursor = cursor_json
+            db.add(row)
 
     return stats

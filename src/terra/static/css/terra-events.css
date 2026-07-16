@@ -1,0 +1,117 @@
+/* Device detail — recent governance events panel */
+.terra-governance-panel {
+  margin: 1rem 0 1.25rem;
+}
+
+.terra-governance-panel__head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.5rem 1rem;
+  margin-bottom: 0.5rem;
+}
+
+.terra-governance-table-wrap {
+  overflow: auto;
+  border: 1px solid hsl(var(--border) / 0.55);
+  border-radius: var(--md-sys-shape-corner-medium);
+}
+
+.terra-governance-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.8125rem;
+}
+
+.terra-governance-table th,
+.terra-governance-table td {
+  padding: 0.55rem 0.75rem;
+  border-bottom: 1px solid hsl(var(--border) / 0.4);
+  text-align: left;
+  vertical-align: top;
+}
+
+.terra-governance-table th {
+  font-size: 0.75rem;
+  font-weight: 500;
+  color: hsl(var(--muted-foreground));
+  background: hsl(var(--surface-container-high) / 0.55);
+}
+
+.terra-gov-chip {
+  display: inline-flex;
+  align-items: center;
+  padding: 0.12rem 0.55rem;
+  border-radius: var(--md-sys-shape-corner-full);
+  font-size: 0.75rem;
+  font-weight: 500;
+  line-height: 1.2;
+  border: 1px solid transparent;
+}
+
+.terra-gov-chip--critical {
+  background: hsl(0 62% 42% / 0.22);
+  color: hsl(0 85% 88%);
+  border-color: hsl(0 70% 52% / 0.55);
+}
+
+.terra-gov-chip--major {
+  background: hsl(38 55% 32% / 0.35);
+  color: hsl(38 90% 88%);
+  border-color: hsl(38 70% 48% / 0.55);
+}
+
+.terra-gov-chip--minor,
+.terra-gov-chip--unknown {
+  background: hsl(var(--surface-container-highest) / 0.75);
+  color: hsl(var(--muted-foreground));
+  border-color: hsl(var(--border) / 0.55);
+}
+
+.terra-gov-chip--info {
+  background: hsl(168 35% 22% / 0.45);
+  color: hsl(166 100% 90%);
+  border-color: hsl(168 58% 44% / 0.55);
+}
+
+.terra-gov-chip--alarm {
+  background: hsl(38 55% 32% / 0.35);
+  color: hsl(38 90% 88%);
+  border-color: hsl(38 70% 48% / 0.55);
+}
+
+.terra-gov-chip--event {
+  background: hsl(142 35% 22% / 0.45);
+  color: hsl(142 85% 88%);
+  border-color: hsl(142 55% 42% / 0.55);
+}
+
+.terra-gov-chip--audit {
+  background: hsl(200 35% 22% / 0.45);
+  color: hsl(200 85% 90%);
+  border-color: hsl(200 55% 44% / 0.55);
+}
+
+.terra-gov-chip--active {
+  background: hsl(142 35% 22% / 0.45);
+  color: hsl(142 85% 88%);
+  border-color: hsl(142 55% 42% / 0.55);
+}
+
+.terra-gov-chip--cleared {
+  background: hsl(var(--surface-container-highest) / 0.75);
+  color: hsl(var(--muted-foreground));
+  border-color: hsl(var(--border) / 0.55);
+}
+
+.terra-gov-active-dot {
+  display: inline-block;
+  width: 0.45rem;
+  height: 0.45rem;
+  margin-right: 0.3rem;
+  border-radius: 50%;
+  background: hsl(142 70% 48%);
+  box-shadow: 0 0 6px hsl(142 70% 48% / 0.65);
+  vertical-align: middle;
+}

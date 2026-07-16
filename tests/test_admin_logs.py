@@ -41,10 +41,45 @@ def test_admin_logs_api_returns_json(client: TestClient) -> None:
     assert r.status_code == 200
     data = r.json()
     assert "entries" in data and "tail_seq" in data
+    assert "tail_db_id" in data
     assert isinstance(data["entries"], list)
 
 
+def test_admin_collector_status_api(client: TestClient) -> None:
+    email = os.environ["TERRA_ADMIN_EMAIL"]
+    password = os.environ["TERRA_ADMIN_PASSWORD"]
+    assert client.post("/api/v1/auth/login", json={"email": email, "password": password}).status_code == 200
+    r = client.get("/api/v1/admin/collector-status")
+    assert r.status_code == 200
+    data = r.json()
+    assert data["state"] in ("alive", "stale", "never")
+    assert "last_batch" in data
+    assert "env" in data
+
+
+def test_admin_logs_merged_persisted_batch_events(client: TestClient) -> None:
+    from terra.collector_status import persist_log_event
+
+    persist_log_event(
+        "INFO",
+        "sdwan_sync_batch",
+        "Periodic SD-WAN sync batch completed (1 manager(s))",
+        detail="run_id=test123 ok=1",
+        source="collector",
+        batch_kind="periodic",
+    )
+    email = os.environ["TERRA_ADMIN_EMAIL"]
+    password = os.environ["TERRA_ADMIN_PASSWORD"]
+    assert client.post("/api/v1/auth/login", json={"email": email, "password": password}).status_code == 200
+    r = client.get("/api/v1/admin/logs?since=0&since_db=0&limit=50")
+    assert r.status_code == 200
+    data = r.json()
+    assert any(e.get("source") == "collector" for e in data["entries"])
+
+
 def test_async_sdwan_sync_job_completes(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
+    cellular_calls: list[int] = []
+
     def fast_sync(
         _db: Any,
         _secret_key: str,
@@ -56,7 +91,12 @@ def test_async_sdwan_sync_job_completes(client: TestClient, monkeypatch: pytest.
             progress_notify("saving", 88, "unit test")
         return (3, None)
 
+    def fake_cellular(_db: Any, _secret_key: str, inst: Any) -> dict[str, Any]:
+        cellular_calls.append(int(inst.id))
+        return {"buckets_pushed": 2, "errors": 0, "devices_fetched": 1, "devices_seen": 1}
+
     monkeypatch.setattr("terra_sdwan.sdwan_sync_job_runner.sync_devices_for_instance", fast_sync)
+    monkeypatch.setattr("terra_sdwan.sdwan_sync_job_runner.sync_cellular_history_best_effort", fake_cellular)
 
     email = os.environ["TERRA_ADMIN_EMAIL"]
     password = os.environ["TERRA_ADMIN_PASSWORD"]
@@ -101,6 +141,7 @@ def test_async_sdwan_sync_job_completes(client: TestClient, monkeypatch: pytest.
     assert last["status"] == "done"
     assert last["rows_touched"] == 3
     assert last["errors"] == 0
+    assert cellular_calls == [iid]
 
 
 def test_sync_sdwan_job_cancel_not_found(client: TestClient) -> None:

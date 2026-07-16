@@ -21,10 +21,12 @@ from terra.routers import (
     admin_pages,
     api_admin_logs,
     api_auth,
+    api_governance,
     api_me,
     api_users,
     auth_pages,
     device_pages,
+    events_pages,
     home,
     sdwan_pages,
 )
@@ -101,11 +103,13 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.mount("/static", StaticFiles(directory=str(static_dir)), name="static")
     app.include_router(home.router)
     app.include_router(device_pages.router)
+    app.include_router(events_pages.router)
     app.include_router(sdwan_pages.router)
     app.include_router(admin_pages.router)
     app.include_router(auth_pages.router)
     app.include_router(api_auth.router)
     app.include_router(api_me.router)
+    app.include_router(api_governance.router)
     app.include_router(api_admin_logs.router)
     app.include_router(api_users.router)
 
@@ -122,7 +126,13 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             if not p.startswith(("/api/", "/admin", "/devices", "/administration", "/auth")):
                 return response
             if request.method == "GET" and any(
-                frag in p for frag in ("/sync-sdwan-jobs/", "/api/v1/admin/logs", "/map-devices-telemetry")
+                frag in p
+                for frag in (
+                    "/sync-sdwan-jobs/",
+                    "/api/v1/admin/logs",
+                    "/api/v1/admin/collector-status",
+                    "/map-devices-telemetry",
+                )
             ):
                 return response
             from terra.app_log_buffer import log_http_request

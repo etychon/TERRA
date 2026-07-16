@@ -5,7 +5,19 @@ from __future__ import annotations
 from datetime import datetime
 from enum import StrEnum
 
-from sqlalchemy import Boolean, Column, DateTime, ForeignKey, Integer, String, Table, Text, UniqueConstraint, func
+from sqlalchemy import (
+    BigInteger,
+    Boolean,
+    Column,
+    DateTime,
+    ForeignKey,
+    Integer,
+    String,
+    Table,
+    Text,
+    UniqueConstraint,
+    func,
+)
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
 
@@ -148,6 +160,115 @@ class SyncedDevice(Base):
 class AuthTokenKind(StrEnum):
     password_reset = "password_reset"
     email_verify = "email_verify"
+
+
+class CollectorStatus(Base):
+    """Singleton row (id=1) tracking background collector heartbeat and last batch summary."""
+
+    __tablename__ = "collector_status"
+
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=False)
+    service_name: Mapped[str] = mapped_column(String(32), nullable=False, default="collector")
+    last_heartbeat_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    interval_seconds: Mapped[int] = mapped_column(Integer, nullable=False, default=300)
+    last_error: Mapped[str | None] = mapped_column(String(512))
+    last_batch_run_id: Mapped[str | None] = mapped_column(String(32))
+    last_batch_started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    last_batch_finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    last_batch_kind: Mapped[str | None] = mapped_column(String(32))
+    last_batch_managers: Mapped[int | None] = mapped_column(Integer)
+    last_batch_ok: Mapped[int | None] = mapped_column(Integer)
+    last_batch_warn: Mapped[int | None] = mapped_column(Integer)
+    last_batch_err: Mapped[int | None] = mapped_column(Integer)
+    last_batch_rows: Mapped[int | None] = mapped_column(Integer)
+    last_batch_wall_ms: Mapped[int | None] = mapped_column(Integer)
+    last_batch_cellular_buckets: Mapped[int | None] = mapped_column(Integer)
+    last_batch_cellular_errors: Mapped[int | None] = mapped_column(Integer)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+
+
+class AppLogEvent(Base):
+    """Cross-process operator log rows (collector batch events visible to core Logs UI)."""
+
+    __tablename__ = "app_log_events"
+
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    ts: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    level: Mapped[str] = mapped_column(String(12), nullable=False)
+    component: Mapped[str] = mapped_column(String(160), nullable=False)
+    message: Mapped[str] = mapped_column(Text, nullable=False)
+    detail: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    http_status: Mapped[int | None] = mapped_column(Integer)
+    source: Mapped[str] = mapped_column(String(16), nullable=False, default="collector")
+
+
+class SdWanGovernanceEvent(Base):
+    """Normalized alarm/event/audit row from Manager governance POST queries."""
+
+    __tablename__ = "sdwan_governance_events"
+    __table_args__ = (
+        UniqueConstraint("sdwan_instance_id", "source_key", name="uq_governance_event_source"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    sdwan_instance_id: Mapped[int] = mapped_column(
+        ForeignKey("sdwan_manager_instances.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    sdwan_tenant_id: Mapped[str] = mapped_column(String(160), nullable=False, default="")
+    sdwan_tenant_name: Mapped[str] = mapped_column(String(255), nullable=False, default="")
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    stream_kind: Mapped[str] = mapped_column(String(16), nullable=False, index=True)
+    source_key: Mapped[str] = mapped_column(String(128), nullable=False)
+    entry_time_utc: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, index=True)
+    ingested_at_utc: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    severity_raw: Mapped[str] = mapped_column(String(64), nullable=False, default="")
+    severity_norm: Mapped[str] = mapped_column(String(32), nullable=False, default="unknown", index=True)
+    active: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
+    system_ip: Mapped[str] = mapped_column(String(64), nullable=False, default="")
+    site_id: Mapped[str] = mapped_column(String(128), nullable=False, default="")
+    synced_device_id: Mapped[int | None] = mapped_column(
+        ForeignKey("synced_devices.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+    title: Mapped[str] = mapped_column(String(512), nullable=False, default="")
+    summary: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    component: Mapped[str] = mapped_column(String(256), nullable=False, default="")
+    rule_name: Mapped[str] = mapped_column(String(256), nullable=False, default="")
+    loguser: Mapped[str] = mapped_column(String(128), nullable=False, default="")
+    logfeature: Mapped[str] = mapped_column(String(128), nullable=False, default="")
+    raw_json: Mapped[str] = mapped_column(Text, nullable=False, default="{}")
+    degraded: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+
+
+class SdWanGovernanceSyncState(Base):
+    """Incremental cursor for governance ingest per manager/tenant/stream."""
+
+    __tablename__ = "sdwan_governance_sync_state"
+    __table_args__ = (
+        UniqueConstraint(
+            "sdwan_instance_id",
+            "sdwan_tenant_id",
+            "stream_kind",
+            name="uq_governance_sync_state",
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    sdwan_instance_id: Mapped[int] = mapped_column(
+        ForeignKey("sdwan_manager_instances.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    sdwan_tenant_id: Mapped[str] = mapped_column(String(160), nullable=False, default="")
+    stream_kind: Mapped[str] = mapped_column(String(16), nullable=False)
+    last_entry_time_ms: Mapped[int | None] = mapped_column(BigInteger)
+    last_success_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    last_error: Mapped[str | None] = mapped_column(String(512))
+    degraded: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
 
 
 class AuthToken(Base):

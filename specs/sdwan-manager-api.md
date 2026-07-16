@@ -35,8 +35,15 @@ All URLs are resolved as **`{manager_base_url}{path}`** with no extra path prefi
 | `GET` | `/dataservice/device/cellular/profiles` | Same. | [`sdwan_device_live.py`](../src/terra_sdwan/sdwan_device_live.py) |
 | `GET` | `/dataservice/device/control/waninterface` | Live + optional sync enrichment; WAN hint (`_EXTRA_PATHS`). | [`sdwan_device_live.py`](../src/terra_sdwan/sdwan_device_live.py) |
 | `POST` | `/dataservice/statistics/eiolte/uniqueAggregation` | **Cellular RF history** (RSRP/RSRQ/RSSI buckets); scoped with `vdevice_name` = system IP; requires full `aggregation` body. After inventory sync → VictoriaMetrics. Multitenant: `switch_tenant` + `VSessionId` before POST. Recipe: [cellular-signal-thresholds](https://github.com/etychon/Catalyst-SD-WAN-API-User-Receipe/blob/main/docs/recipes/cellular-signal-thresholds.md). | [`sdwan_cellular_history.py`](../src/terra_sdwan/sdwan_cellular_history.py) |
+| `GET` | `/dataservice/alarms/query/fields` | Governance ingest — alarm query field discovery. | [`sdwan_governance.py`](../src/terra_sdwan/sdwan_governance.py) |
+| `GET` | `/dataservice/events/fields` | Governance ingest — event field discovery. | [`sdwan_governance.py`](../src/terra_sdwan/sdwan_governance.py) |
+| `GET` | `/dataservice/auditlog/fields` | Governance ingest — audit field discovery. | [`sdwan_governance.py`](../src/terra_sdwan/sdwan_governance.py) |
+| `POST` | `/dataservice/alarms` | Governance ingest — active/cleared alarms (rules query body). | [`sdwan_governance.py`](../src/terra_sdwan/sdwan_governance.py) |
+| `POST` | `/dataservice/alarms/count` | Optional alarm counts (badges / histograms). | [`sdwan_governance.py`](../src/terra_sdwan/sdwan_governance.py) |
+| `POST` | `/dataservice/events` | Governance ingest — platform events (fallback `GET /event` on 404). | [`sdwan_governance.py`](../src/terra_sdwan/sdwan_governance.py) |
+| `POST` | `/dataservice/auditlog` | Governance ingest — Manager admin audit log. | [`sdwan_governance.py`](../src/terra_sdwan/sdwan_governance.py) |
 
-**Count:** 18 distinct path templates (plus dynamic `{tenantId}` on tenant switch). Anything not listed here is **out of scope** for current TERRA code unless this table is updated.
+**Count:** 25 distinct path templates (plus dynamic `{tenantId}` on tenant switch). Anything not listed here is **out of scope** for current TERRA code unless this table is updated.
 
 **Official references (not exhaustive):** [Tenant](https://developer.cisco.com/docs/sdwan/20-16/tenant/); [Device realtime monitoring](https://developer.cisco.com/docs/sdwan/device-realtime-monitoring/); [Get device interface](https://developer.cisco.com/docs/sdwan/20-16/get-device-interface/).
 
@@ -56,7 +63,7 @@ When adding or removing Manager HTTP usage:
 
 ## Scope and non-goals
 
-- **In scope:** read-only **inventory sync**, **per-device enrichment**, **live dataservice reads** for the dashboard, **Verify/probe** flows, and **admin operator logs** tied to Manager HTTP.
+- **In scope:** read-only **inventory sync**, **per-device enrichment**, **live dataservice reads** for the dashboard, **governance ingest** (alarms/events/audit), **Verify/probe** flows, and **admin operator logs** tied to Manager HTTP.
 - **Out of scope here:** OpenAPI-style field catalogs per endpoint; **Cisco Catalyst Center** (future connector only — not documented in this file).
 - **Still Manager’s job:** full configuration, policy push, and golden-template workflows unless product direction explicitly expands TERRA.
 
@@ -90,9 +97,16 @@ Implemented in [`sdwan_sync.py`](../src/terra_sdwan/sdwan_sync.py). Endpoint ord
 - **Outbound Manager HTTP (summary lines):** component **`sdwan_http`** — [`specs/logging-ui.md`](logging-ui.md); path filtering in [`sdwan_operator_log.py`](../src/terra_sdwan/sdwan_operator_log.py).
 - **Compose default:** the **periodic** batch runs in the **`collector`** service; **`core`** still emits **`sdwan_sync_batch`** for **user-initiated** “sync all” and on-demand manager syncs.
 
-## Planned additions (syslog / alarms / events)
+## Governance ingest (alarms / events / audit)
 
-When syslog, alarm, or event **dataservice** paths are wired in code, **add a row** to the cookbook table above and document multitenant / rate-limit caveats in [`specs/integrations.md`](integrations.md). Ingestion should target the **`collector`** with normalized storage (Postgres projections + VictoriaMetrics per [`specs/telemetry-storage.md`](telemetry-storage.md)).
+- **Module:** [`sdwan_governance.py`](../src/terra_sdwan/sdwan_governance.py) — `POST` query APIs per [recipe](https://github.com/etychon/Catalyst-SD-WAN-API-User-Recipe/blob/main/docs/recipes/syslog-alarms-audit-rbac.md).
+- **Schedule:** separate collector loop (`TERRA_GOVERNANCE_SYNC_INTERVAL_SECONDS`); **not** mixed with device live poll or per-device enrich.
+- **Storage:** Postgres `sdwan_governance_events` + sync cursors — see [`specs/governance-events.md`](governance-events.md).
+- **UI:** `/events` React grid + device detail recent panel; reads projections only.
+
+## Planned additions (syslog push)
+
+Syslog remains **push/SIEM** (not REST poll). When a receiver is added, document separately; do not duplicate governance POST ingest.
 
 ## Agent checklist (new dataservice usage)
 

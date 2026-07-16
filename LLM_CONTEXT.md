@@ -25,7 +25,7 @@ Surface **compact** device cards or equivalents, not Manager clone screens:
 - **Transport:** WAN interface utilization; **cellular** signal/quality and detailed drill-down view; single-uplink scenarios must degrade gracefully (no false “all green” when the only path is marginal).
 - **Edge compute:** IOx application status when exposed via APIs/device model.
 - **~30-day GPS / metrics retention:** default Compose includes **VictoriaMetrics** (see `specs/telemetry-storage.md`); prefer Cisco Manager historical APIs when they cover the window.
-- **Reporting / audit:** scheduled or on-demand exports, **events**, **alerts**, audit trails of dashboard actions (not Manager audit unless explicitly integrated).
+- **Reporting / audit:** scheduled or on-demand exports, **events** (Manager alarms/events/audit via **`/events`** React grid + device detail panel; see **`specs/governance-events.md`**), **alerts**, audit trails of dashboard actions (not Manager audit unless explicitly integrated).
 
 ## UI stack, design system, and AI ergonomics
 
@@ -116,7 +116,7 @@ Use **multi-arch base images** and/or explicit `platform` policies only where ne
 - **`specs/`:** keep short; update with behavioral PRs. **`specs/design-system.md`** owns UI SSOT rules. **`specs/sdwan-manager-api.md`** maps which **Cisco Catalyst SD-WAN Manager** dataservice paths TERRA uses (auth, inventory, live reads); deeper multitenant/interface narrative lives in **`specs/integrations.md`**.
 - **`frontend/`:** dashboard UI, Tailwind + shadcn-oriented setup, **tokens** (`src/tokens/`), **globals.css**, ESLint design guardrails.
 - **`.cursor/skills/terra-ui-design-system/`:** Cursor **SKILL** for agents implementing UI (loads detailed guardrails + file paths).
-- **`src/terra_sdwan/`:** SD-WAN Manager HTTP client, inventory sync, live dataservice reads — shared by **`core`** and **`collector`**.
+- **`src/terra_sdwan/`:** SD-WAN Manager HTTP client, inventory sync, live dataservice reads, **governance ingest** (`sdwan_governance.py` — alarms/events/audit POST queries into Postgres) — shared by **`core`** and **`collector`**.
 - **`src/terra/`:** FastAPI **`core`** app (auth, RBAC, APIs, Jinja UI); **must** remain reachable via the Compose **`core`** service and `/health`.
 - **`docker-compose.yml` + `Dockerfile` + `docker/web/`:** mandatory operator entrypoint; **HTTPS on host port 4434** by default (`web` nginx terminates TLS; **`core`** is internal HTTP on :8000). Default Compose adds **`postgres`**, **`victoriametrics`**, and **`collector`** (see `specs/architecture.md`). Keep defaults dev-safe and document production overrides (`TERRA_SECRET_KEY`, external certs in `docker/certs/`, etc.).
 - **`frontend/`:** dashboard design-system package (tokens, lint); when a **runnable** SPA or static server is added, it **must** ship in Compose alongside **`core`** (same single `docker compose up` story).

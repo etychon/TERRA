@@ -424,14 +424,6 @@ def fetch_device_inventory(
     if vs:
         return _fetch_device_inventory_with_vsession(client, base, to)
     r = client.get(f"{base}/dataservice/device", headers={"Accept": "application/json"}, timeout=to)
-    if r.status_code >= 400:
-        msg = f"device inventory HTTP {r.status_code}"
-        raise RuntimeError(msg)
-    try:
-        body = r.json()
-    except ValueError as e:
-        msg = "device inventory invalid JSON"
-        raise RuntimeError(msg) from e
 
     merged: dict[str, dict[str, Any]] = {}
     order: list[str] = []
@@ -448,8 +440,18 @@ def fetch_device_inventory(
                     if fk not in cur or cur.get(fk) in (None, "", []):
                         cur[fk] = fv
 
-    primary = rows_from_dataservice_body(body)
-    ingest(primary)
+    if r.status_code < 400:
+        try:
+            body = r.json()
+        except ValueError as e:
+            msg = "device inventory invalid JSON"
+            raise RuntimeError(msg) from e
+        ingest(rows_from_dataservice_body(body))
+    else:
+        logger.debug(
+            "SD-WAN primary device inventory HTTP %s; trying fallback paths",
+            r.status_code,
+        )
 
     has_wan_edge = any(_raw_row_is_wan_edge(item) for item in merged.values())
     if not has_wan_edge:
@@ -458,6 +460,10 @@ def fetch_device_inventory(
     if not merged:
         for path in _FALLBACK_DEVICE_PATHS:
             ingest(_get_dataservice_inventory_rows(client, base, path, request_timeout=to))
+
+    if not merged and r.status_code >= 400:
+        msg = f"device inventory HTTP {r.status_code}"
+        raise RuntimeError(msg)
 
     return [merged[k] for k in order]
 
@@ -923,6 +929,262 @@ def sync_devices_for_instance(
     return touched, None
 
 
+def sync_cellular_history_best_effort(
+    db: Session,
+    secret_key: str,
+    inst: SdWanManagerInstance,
+) -> dict[str, Any]:
+    """Pull EIOLTE history after inventory sync; returns summary stats, never raises."""
+    empty: dict[str, Any] = {
+        "devices_seen": 0,
+        "devices_fetched": 0,
+        "buckets_pushed": 0,
+        "errors": 0,
+    }
+    try:
+        from terra_sdwan.sdwan_cellular_history import sync_cellular_history_for_instance
+
+        stats = sync_cellular_history_for_instance(db, secret_key, inst)
+        if isinstance(stats, dict):
+            return {**empty, **stats}
+    except Exception:
+        logger.exception("Cellular history sync failed instance_id=%s", inst.id)
+        empty["errors"] = 1
+    return empty
+
+
+def _inventory_row_for_device(
+    rows: list[dict[str, Any]],
+    device: SyncedDevice,
+) -> dict[str, Any] | None:
+    uid = (device.source_device_uuid or "").strip()
+    if not uid:
+        return None
+    for raw in rows:
+        norm = normalize_inventory_row(raw)
+        if str(norm.get("source_device_uuid") or "").strip() == uid:
+            return raw
+    return None
+
+
+def _stored_inventory_row(device: SyncedDevice) -> dict[str, Any]:
+    try:
+        parsed = json.loads(device.raw_json)
+        return parsed if isinstance(parsed, dict) else {}
+    except json.JSONDecodeError:
+        return {}
+
+
+def _best_effort_switch_tenant(
+    client: httpx.Client,
+    base: str,
+    tenant_id: str,
+    *,
+    request_timeout: float,
+) -> bool:
+    try:
+        switch_tenant(client, base, tenant_id, request_timeout=request_timeout)
+    except (RuntimeError, ValueError, httpx.RequestError, OSError) as e:
+        logger.warning("SD-WAN tenant switch skipped for device sync (tenant=%s): %s", tenant_id, e)
+        client.headers.pop("VSessionId", None)
+        return False
+    return True
+
+
+def _best_effort_refresh_inventory_row(
+    client: httpx.Client,
+    base: str,
+    device: SyncedDevice,
+    *,
+    request_timeout: float,
+) -> dict[str, Any] | None:
+    try:
+        inv_rows = fetch_device_inventory(client, base, request_timeout=request_timeout)
+    except (RuntimeError, httpx.RequestError, OSError) as e:
+        logger.warning("SD-WAN inventory list unavailable during device sync: %s", e)
+        return None
+    return _inventory_row_for_device(inv_rows, device)
+
+
+def sync_synced_device_detail(
+    db: Session,
+    secret_key: str,
+    device: SyncedDevice,
+    inst: SdWanManagerInstance,
+    *,
+    progress_notify: Callable[[str, int, str], None] | None = None,
+    cancel_check: Callable[[], bool] | None = None,
+) -> tuple[bool, str | None]:
+    """
+    Refresh one ``SyncedDevice``: inventory row, interface/cellular enrich, DB persist, EIOLTE history.
+
+    Returns ``(ok, error_message)``.
+    """
+    if inst.link_status != SdWanLinkStatus.connected.value:
+        _progress_notify(progress_notify, "failed", 100, "Manager is not connected — run Verify first.")
+        return False, "instance not connected"
+
+    settings = get_settings()
+    now = _utcnow()
+    inv_to = float(settings.sdwan_sync_inventory_timeout_seconds)
+    enrich_to = float(settings.sdwan_sync_enrich_request_timeout_seconds)
+    tenant_id = (device.sdwan_tenant_id or "").strip()
+    tenant_label = (device.sdwan_tenant_name or tenant_id or "").strip()
+    cluster = (inst.display_name or inst.base_url or "Manager").strip()
+    raw = _stored_inventory_row(device)
+
+    try:
+        _raise_if_cancelled(cancel_check)
+        _progress_notify(progress_notify, "connecting", 8, f"Opening session to {cluster}…")
+        with open_manager_http_client(secret_key, inst, log_tenant=tenant_label) as client:
+            base = inst.base_url.rstrip("/")
+            if tenant_id:
+                _progress_notify(progress_notify, "inventory", 18, "Switching tenant context…")
+                if not _best_effort_switch_tenant(client, base, tenant_id, request_timeout=inv_to):
+                    _progress_notify(
+                        progress_notify,
+                        "inventory",
+                        22,
+                        "Tenant switch unavailable — continuing with provider-scoped token…",
+                    )
+            _raise_if_cancelled(cancel_check)
+            _progress_notify(progress_notify, "inventory", 28, "Refreshing device inventory row…")
+            refreshed = _best_effort_refresh_inventory_row(
+                client, base, device, request_timeout=inv_to
+            )
+            if refreshed is not None:
+                raw = refreshed
+            elif not raw:
+                msg = f"{cluster}: device inventory unavailable and no stored row in TERRA."
+                _progress_notify(progress_notify, "failed", 100, msg)
+                return False, msg
+            elif refreshed is None:
+                _progress_notify(
+                    progress_notify,
+                    "inventory",
+                    32,
+                    "Using stored inventory (Manager list unavailable)…",
+                )
+            _raise_if_cancelled(cancel_check)
+            _progress_notify(
+                progress_notify,
+                "enriching",
+                48,
+                "Fetching interfaces, cellular, and WAN dataservice rows…",
+            )
+            enriched = enrich_inventory_row_for_sync(
+                client,
+                base,
+                raw,
+                request_timeout=enrich_to,
+                verify_tls=inst.verify_tls,
+            )
+    except SdWanSyncCancelled:
+        _progress_notify(progress_notify, "cancelled", 0, "Cancelled.")
+        return False, "cancelled"
+    except (RuntimeError, ValueError, httpx.RequestError, OSError) as e:
+        msg = f"{cluster}: {e!s}"[:500]
+        _progress_notify(progress_notify, "failed", 100, msg)
+        return False, msg
+
+    _raise_if_cancelled(cancel_check)
+    _progress_notify(progress_notify, "saving", 72, "Saving enriched inventory to TERRA…")
+    norm = normalize_inventory_row(enriched)
+    new_r = str(norm["reachability"])
+    old_r = device.reachability
+    if old_r != new_r:
+        device.state_changed_at_utc = now
+    device.hostname = str(norm["hostname"])[:255]
+    device.serial_number = str(norm["serial_number"])[:128]
+    device.model = str(norm["model"])[:128]
+    device.software_version = str(norm["software_version"])[:128]
+    device.device_type = str(norm["device_type"])[:64]
+    device.site_id = (str(norm["site_id"])[:64] if norm["site_id"] else None)
+    device.reachability = new_r[:32]
+    device.synced_at_utc = now
+    device.raw_json = json.dumps(enriched, separators=(",", ":"), default=str)
+    if tenant_label and not (device.sdwan_tenant_name or "").strip():
+        device.sdwan_tenant_name = tenant_label[:255]
+    db.add(device)
+
+    _raise_if_cancelled(cancel_check)
+    _progress_notify(progress_notify, "cellular", 88, "Refreshing cellular RF history…")
+    try:
+        from terra_sdwan.sdwan_cellular_history import sync_cellular_history_for_device
+
+        sync_cellular_history_for_device(db, secret_key, inst, device)
+    except Exception:
+        logger.exception("Per-device cellular history failed device_id=%s", device.id)
+
+    _progress_notify(progress_notify, "done", 100, "Device sync complete.")
+    return True, None
+
+
+def _cellular_detail_suffix(stats: dict[str, Any] | None) -> str:
+    if not stats:
+        return ""
+    buckets = int(stats.get("buckets_pushed") or 0)
+    errors = int(stats.get("errors") or 0)
+    fetched = int(stats.get("devices_fetched") or 0)
+    if buckets == 0 and errors == 0 and fetched == 0:
+        return ""
+    return f" cellular_buckets={buckets} cellular_errors={errors} cellular_fetched={fetched}"
+
+
+def _cluster_labels_for_batch(instance_ids: list[int]) -> str:
+    """Comma-separated manager display names for batch log messages."""
+    if not instance_ids:
+        return ""
+    from terra.db import get_session_factory
+
+    sf = get_session_factory()
+    labels: list[str] = []
+    with sf() as db:
+        for iid in instance_ids:
+            inst = db.get(SdWanManagerInstance, iid)
+            if inst is None:
+                labels.append(f"id:{iid}")
+            else:
+                labels.append((inst.display_name or "").strip() or f"id:{iid}")
+    return ", ".join(labels)
+
+
+def _manager_batch_log_message(res: dict[str, Any], batch_kind: str, *, outcome: str) -> str:
+    cluster = str(res.get("cluster") or "(unknown)")
+    rows = int(res.get("rows") or 0)
+    duration_ms = int(res.get("duration_ms") or 0)
+    cellular = res.get("cellular_stats") or {}
+    buckets = int(cellular.get("buckets_pushed") or 0)
+    base = f'{outcome}: "{cluster}" — {rows} rows in {duration_ms}ms ({batch_kind})'
+    if buckets > 0:
+        return f"{base}, cellular_buckets={buckets}"
+    return base
+
+
+def _emit_batch_log(
+    level: str,
+    message: str,
+    *,
+    detail: str,
+    batch_kind: str,
+) -> None:
+    append_event(level, "sdwan_sync_batch", message, detail=detail)
+    if batch_kind == "periodic":
+        try:
+            from terra.collector_status import persist_log_event
+
+            persist_log_event(
+                level,
+                "sdwan_sync_batch",
+                message,
+                detail=detail,
+                source="collector",
+                batch_kind=batch_kind,
+            )
+        except Exception:
+            logger.debug("persist batch log skipped", exc_info=True)
+
+
 def _sync_one_manager_worker(secret_key: str, instance_id: int) -> dict[str, Any]:
     """Sync one Manager in an isolated DB session (for concurrent batch workers)."""
     from terra.db import get_session_factory
@@ -947,18 +1209,23 @@ def _sync_one_manager_worker(secret_key: str, instance_id: int) -> dict[str, Any
             if inst.link_status != SdWanLinkStatus.connected.value:
                 out["error"] = "not connected"
                 return out
+            from terra_sdwan.sdwan_sync_instance_gate import (
+                release_batch_instance_sync,
+                try_batch_instance_sync,
+            )
+
+            if not try_batch_instance_sync(instance_id):
+                out["error"] = "skipped (operator sync in progress)"
+                out["skipped"] = True
+                return out
             try:
                 n, err = sync_devices_for_instance(db, secret_key, inst)
+                cellular_stats: dict[str, Any] | None = None
                 if err is None:
-                    try:
-                        from terra_sdwan.sdwan_cellular_history import sync_cellular_history_for_instance
-
-                        sync_cellular_history_for_instance(db, secret_key, inst)
-                    except Exception:
-                        logger.exception(
-                            "Cellular history sync failed instance_id=%s",
-                            instance_id,
-                        )
+                    db.commit()
+                    db.refresh(inst)
+                    cellular_stats = sync_cellular_history_best_effort(db, secret_key, inst)
+                    out["cellular_stats"] = cellular_stats
                 db.commit()
             except Exception:
                 logger.exception(
@@ -969,6 +1236,8 @@ def _sync_one_manager_worker(secret_key: str, instance_id: int) -> dict[str, Any
                 out["crashed"] = True
                 out["error"] = "worker crashed"
                 return out
+            finally:
+                release_batch_instance_sync(instance_id)
             out["rows"] = max(int(n), 0)
             out["error"] = err
     except Exception:
@@ -1001,12 +1270,32 @@ def _execute_sdwan_manager_sync_batch(
         max_w = 1
     label = "Periodic" if batch_kind == "periodic" else "User bulk"
     t_batch = time.perf_counter()
+    cluster_labels = _cluster_labels_for_batch(sorted_instance_ids)
 
-    append_event(
+    if batch_kind == "periodic":
+        try:
+            from terra.collector_status import record_batch_start
+
+            record_batch_start(
+                run_id=run_id,
+                batch_kind=batch_kind,
+                managers=n_m,
+                max_concurrent=max_w,
+            )
+        except Exception:
+            logger.debug("record_batch_start skipped", exc_info=True)
+
+    start_detail = f"run_id={run_id} managers={n_m} max_concurrent={max_w} batch_kind={batch_kind}"
+    if cluster_labels:
+        start_detail += f' clusters="{cluster_labels}"'
+    start_msg = f"{label} SD-WAN sync batch started ({n_m} manager(s))"
+    if cluster_labels:
+        start_msg = f'{label} SD-WAN sync batch started ({n_m} manager(s): {cluster_labels})'
+    _emit_batch_log(
         "INFO",
-        "sdwan_sync_batch",
-        f"{label} SD-WAN sync batch started ({n_m} manager(s))",
-        detail=f"run_id={run_id} managers={n_m} max_concurrent={max_w} batch_kind={batch_kind}",
+        start_msg,
+        detail=start_detail,
+        batch_kind=batch_kind,
     )
     logger.info(
         "%s SD-WAN sync batch started run_id=%s managers=%s max_concurrent=%s kind=%s",
@@ -1027,12 +1316,30 @@ def _execute_sdwan_manager_sync_batch(
     results: list[dict[str, Any]] = []
     if not sorted_instance_ids:
         wall_ms = 0
-        append_event(
+        _emit_batch_log(
             "INFO",
-            "sdwan_sync_batch",
             f"{label} SD-WAN sync batch completed (0 managers)",
             detail=f"run_id={run_id} wall_ms={wall_ms} ok=0 warn=0 err=0 rows=0",
+            batch_kind=batch_kind,
         )
+        if batch_kind == "periodic":
+            try:
+                from terra.collector_status import record_batch_finish
+
+                record_batch_finish(
+                    run_id=run_id,
+                    batch_kind=batch_kind,
+                    managers=0,
+                    ok=0,
+                    warn=0,
+                    err=0,
+                    rows=0,
+                    wall_ms=wall_ms,
+                    cellular_buckets=0,
+                    cellular_errors=0,
+                )
+            except Exception:
+                logger.debug("record_batch_finish skipped", exc_info=True)
         logger.info(
             "%s SD-WAN sync batch completed run_id=%s managers=0 wall_ms=0",
             label,
@@ -1064,8 +1371,14 @@ def _execute_sdwan_manager_sync_batch(
             )
             if res.get("error"):
                 det += f' error={str(res["error"])[:400]}'
+            det += _cellular_detail_suffix(res.get("cellular_stats"))
             if res.get("crashed"):
-                append_event("ERROR", "sdwan_sync_batch", f"Manager sync failed ({batch_kind})", detail=det[:4000])
+                _emit_batch_log(
+                    "ERROR",
+                    _manager_batch_log_message(res, batch_kind, outcome="Manager sync failed"),
+                    detail=det[:4000],
+                    batch_kind=batch_kind,
+                )
                 logger.error(
                     (
                         "SD-WAN batch instance done run_id=%s instance_id=%s cluster=%r "
@@ -1086,11 +1399,11 @@ def _execute_sdwan_manager_sync_batch(
                     },
                 )
             elif res.get("error"):
-                append_event(
+                _emit_batch_log(
                     "WARNING",
-                    "sdwan_sync_batch",
-                    f"Manager sync finished with error ({batch_kind})",
+                    _manager_batch_log_message(res, batch_kind, outcome="Manager sync error"),
                     detail=det[:4000],
+                    batch_kind=batch_kind,
                 )
                 logger.warning(
                     "SD-WAN batch instance done run_id=%s instance_id=%s cluster=%r duration_ms=%s rows=%s err=%s",
@@ -1110,7 +1423,12 @@ def _execute_sdwan_manager_sync_batch(
                     },
                 )
             else:
-                append_event("INFO", "sdwan_sync_batch", f"Manager sync ok ({batch_kind})", detail=det[:4000])
+                _emit_batch_log(
+                    "INFO",
+                    _manager_batch_log_message(res, batch_kind, outcome="Manager sync ok"),
+                    detail=det[:4000],
+                    batch_kind=batch_kind,
+                )
                 logger.info(
                     "SD-WAN batch instance done run_id=%s instance_id=%s cluster=%r duration_ms=%s rows=%s",
                     run_id,
@@ -1132,15 +1450,45 @@ def _execute_sdwan_manager_sync_batch(
     warn_n = sum(1 for r in results if r.get("error") and not r.get("crashed"))
     err_n = sum(1 for r in results if r.get("crashed"))
     total_rows = sum(int(r.get("rows") or 0) for r in results)
-    append_event(
-        "INFO",
-        "sdwan_sync_batch",
-        f"{label} SD-WAN sync batch completed ({n_m} manager(s))",
-        detail=(
-            f"run_id={run_id} wall_ms={wall_ms} ok={ok_n} warn={warn_n} err={err_n} rows={total_rows} "
-            f"max_concurrent={max_w}"
-        )[:4000],
+    total_cellular_buckets = sum(
+        int((r.get("cellular_stats") or {}).get("buckets_pushed") or 0) for r in results
     )
+    total_cellular_errors = sum(int((r.get("cellular_stats") or {}).get("errors") or 0) for r in results)
+    end_detail = (
+        f"run_id={run_id} wall_ms={wall_ms} ok={ok_n} warn={warn_n} err={err_n} rows={total_rows} "
+        f"max_concurrent={max_w} cellular_buckets={total_cellular_buckets} "
+        f"cellular_errors={total_cellular_errors}"
+    )[:4000]
+    end_msg = (
+        f"{label} SD-WAN sync batch completed ({n_m} manager(s)) — "
+        f"ok={ok_n} warn={warn_n} err={err_n} rows={total_rows} in {wall_ms}ms"
+    )
+    if total_cellular_buckets > 0 or total_cellular_errors > 0:
+        end_msg += f", cellular_buckets={total_cellular_buckets} cellular_errors={total_cellular_errors}"
+    _emit_batch_log(
+        "INFO",
+        end_msg,
+        detail=end_detail,
+        batch_kind=batch_kind,
+    )
+    if batch_kind == "periodic":
+        try:
+            from terra.collector_status import record_batch_finish
+
+            record_batch_finish(
+                run_id=run_id,
+                batch_kind=batch_kind,
+                managers=n_m,
+                ok=ok_n,
+                warn=warn_n,
+                err=err_n,
+                rows=total_rows,
+                wall_ms=wall_ms,
+                cellular_buckets=total_cellular_buckets,
+                cellular_errors=total_cellular_errors,
+            )
+        except Exception:
+            logger.debug("record_batch_finish skipped", exc_info=True)
     logger.info(
         "%s SD-WAN sync batch completed run_id=%s managers=%s wall_ms=%s ok=%s warn=%s err=%s rows=%s",
         label,

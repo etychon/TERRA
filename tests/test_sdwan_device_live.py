@@ -58,6 +58,38 @@ def test_fetch_live_device_dashboard_interfaces() -> None:
     assert sections == []
 
 
+def test_fetch_live_device_dashboard_reports_progress() -> None:
+    events: list[dict[str, object]] = []
+
+    def dispatch(request: httpx.Request) -> httpx.Response:
+        u = str(request.url)
+        if "dataservice/device/interface" in u and "deviceId=10.0.0.1" in u:
+            return httpx.Response(
+                200,
+                json={"data": [{"ifname": "G0/0", "ip-address": "10.0.0.1", "vpn-id": "0", "admin-state": "up"}]},
+            )
+        if "cellular/modem" in u:
+            return httpx.Response(200, json={"data": [{"slot": "0"}]})
+        return httpx.Response(404)
+
+    transport = httpx.MockTransport(dispatch)
+    with httpx.Client(transport=transport) as client:
+        if_rows, sections, note = fetch_live_device_dashboard(
+            client,
+            "https://vmanager.example.invalid",
+            {"system-ip": "10.0.0.1"},
+            progress=lambda ev: events.append(ev),
+        )
+    assert len(if_rows) == 1
+    assert note is not None
+    step_ids = [str(e.get("step_id")) for e in events if e.get("type") == "step"]
+    assert "resolve_id" in step_ids
+    assert "interfaces" in step_ids
+    assert any(s.startswith("cellular_") for s in step_ids)
+    done_iface = [e for e in events if e.get("step_id") == "interfaces" and e.get("status") == "done"]
+    assert done_iface and "elapsed_ms" in done_iface[0]
+
+
 def test_fetch_live_no_candidates() -> None:
     def _four_oh_four(_request: httpx.Request) -> httpx.Response:
         return httpx.Response(404)

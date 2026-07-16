@@ -14,6 +14,7 @@ logger = logging.getLogger(__name__)
 
 
 async def _sdwan_background_loop() -> None:
+    from terra.collector_status import touch_collector_heartbeat
     from terra_sdwan.sdwan_sync import sync_all_connected_managers
 
     settings = get_settings()
@@ -21,15 +22,41 @@ async def _sdwan_background_loop() -> None:
         return
     await asyncio.sleep(settings.sdwan_sync_startup_delay_seconds)
     while True:
+        s = get_settings()
+        touch_collector_heartbeat(interval_seconds=s.sdwan_sync_interval_seconds)
         try:
-            s = get_settings()
             await asyncio.to_thread(sync_all_connected_managers, s.secret_key)
         except asyncio.CancelledError:
             raise
         except Exception:
             logger.exception("SD-WAN background device sync failed")
+            touch_collector_heartbeat(
+                interval_seconds=s.sdwan_sync_interval_seconds,
+                error="background sync failed",
+            )
         s2 = get_settings()
         await asyncio.sleep(s2.sdwan_sync_interval_seconds)
+
+
+async def _governance_background_loop() -> None:
+    from terra.config import get_settings
+    from terra_sdwan.sdwan_governance import sync_governance_for_connected_managers
+
+    settings = get_settings()
+    if not settings.governance_sync_enabled:
+        return
+    await asyncio.sleep(settings.sdwan_sync_startup_delay_seconds + 30)
+    while True:
+        try:
+            s = get_settings()
+            if s.governance_sync_enabled:
+                await asyncio.to_thread(sync_governance_for_connected_managers, s.secret_key)
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            logger.exception("SD-WAN governance background sync failed")
+        s2 = get_settings()
+        await asyncio.sleep(s2.governance_sync_interval_seconds)
 
 
 async def _async_main() -> None:
@@ -46,12 +73,17 @@ async def _async_main() -> None:
         logger.warning("TERRA_SDWAN_BACKGROUND_SYNC is false — collector exiting (nothing to do)")
         return
     task = asyncio.create_task(_sdwan_background_loop(), name="terra-collector-sdwan")
+    tasks: list[asyncio.Task[None]] = [task]
+    if get_settings().governance_sync_enabled:
+        tasks.append(asyncio.create_task(_governance_background_loop(), name="terra-collector-governance"))
     try:
-        await task
+        await asyncio.gather(*tasks)
     finally:
-        task.cancel()
-        with contextlib.suppress(asyncio.CancelledError):
-            await task
+        for t in tasks:
+            t.cancel()
+        for t in tasks:
+            with contextlib.suppress(asyncio.CancelledError):
+                await t
         from terra_sdwan.sdwan_sync_job_runner import shutdown_executor
 
         shutdown_executor()
@@ -59,4 +91,9 @@ async def _async_main() -> None:
 
 def main() -> None:
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s %(message)s")
+    logger.info("collector main() entered sdwan_background_sync=%s", get_settings().sdwan_background_sync)
     asyncio.run(_async_main())
+
+
+if __name__ == "__main__":
+    main()

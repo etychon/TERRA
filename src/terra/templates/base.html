@@ -35,6 +35,7 @@
           <div class="terra-sidebar-inner">
             <a href="/" class="terra-sidebar-link{% if (nav_active|default('')) == 'home' %} is-active{% endif %}">Home</a>
             <a href="/devices" class="terra-sidebar-link{% if (nav_active|default('')) == 'devices' %} is-active{% endif %}">Devices</a>
+            <a href="/events" class="terra-sidebar-link{% if (nav_active|default('')) == 'events' %} is-active{% endif %}">Events</a>
             <a href="/administration/sd-wan" class="terra-sidebar-link{% if (nav_active|default('')) == 'sdwan' %} is-active{% endif %}">Administration</a>
             {% if nav_is_admin|default(false) %}
             <a href="/admin/users" class="terra-sidebar-link{% if (nav_active|default('')) == 'users' %} is-active{% endif %}">Users</a>

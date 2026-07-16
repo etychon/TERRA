@@ -1,0 +1,225 @@
+@import "../devices/devices-grid.css";
+
+.terra-eg-root {
+  margin-top: 0.75rem;
+}
+
+.terra-eg-toolbar {
+  align-items: flex-start;
+}
+
+.terra-eg-presets,
+.terra-eg-streams,
+.terra-eg-severity-bar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.45rem 0.65rem;
+  align-items: center;
+}
+
+.terra-eg-severity-bar {
+  margin: 0.65rem 0;
+}
+
+.terra-eg-sev-btn {
+  cursor: pointer;
+  font: inherit;
+  appearance: none;
+  transition:
+    border-color 0.15s ease,
+    box-shadow 0.15s ease,
+    filter 0.15s ease;
+}
+
+.terra-eg-sev-btn--active {
+  position: relative;
+  z-index: 1;
+  font-weight: 600;
+  border-width: 2px;
+  animation: terra-eg-sev-pulse 1.35s ease-in-out infinite;
+}
+
+.terra-eg-sev-btn--active-error {
+  --terra-eg-sev-ring: hsl(0 82% 62%);
+  --terra-eg-sev-ring-soft: hsl(0 82% 62% / 0.42);
+  --terra-eg-sev-ring-fade: hsl(0 82% 62% / 0);
+  border-color: hsl(0 78% 58% / 0.95) !important;
+  background: hsl(0 62% 42% / 0.34) !important;
+}
+
+.terra-eg-sev-btn--active-warning {
+  --terra-eg-sev-ring: hsl(18 92% 58%);
+  --terra-eg-sev-ring-soft: hsl(18 92% 58% / 0.42);
+  --terra-eg-sev-ring-fade: hsl(18 92% 58% / 0);
+  border-color: hsl(18 88% 54% / 0.95) !important;
+  background: hsl(var(--destructive) / 0.28) !important;
+}
+
+.terra-eg-sev-btn--active-success {
+  --terra-eg-sev-ring: hsl(168 88% 52%);
+  --terra-eg-sev-ring-soft: hsl(168 88% 52% / 0.45);
+  --terra-eg-sev-ring-fade: hsl(168 88% 52% / 0);
+  border-color: hsl(168 82% 48% / 0.95) !important;
+  background: hsl(var(--primary) / 0.24) !important;
+}
+
+.terra-eg-sev-btn--active-neutral {
+  --terra-eg-sev-ring: hsl(210 18% 72%);
+  --terra-eg-sev-ring-soft: hsl(210 18% 72% / 0.38);
+  --terra-eg-sev-ring-fade: hsl(210 18% 72% / 0);
+  border-color: hsl(210 16% 68% / 0.92) !important;
+  background: hsl(var(--surface-container-highest) / 0.82) !important;
+  color: hsl(var(--foreground)) !important;
+}
+
+@keyframes terra-eg-sev-pulse {
+  0%,
+  100% {
+    box-shadow:
+      0 0 0 2px var(--terra-eg-sev-ring),
+      0 0 0 5px var(--terra-eg-sev-ring-soft),
+      0 0 14px var(--terra-eg-sev-ring-soft);
+    filter: brightness(1.04);
+  }
+  50% {
+    box-shadow:
+      0 0 0 3px var(--terra-eg-sev-ring),
+      0 0 0 10px var(--terra-eg-sev-ring-fade),
+      0 0 26px var(--terra-eg-sev-ring-soft);
+    filter: brightness(1.12);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .terra-eg-sev-btn--active {
+    animation: none;
+    box-shadow:
+      0 0 0 3px var(--terra-eg-sev-ring),
+      0 0 0 6px var(--terra-eg-sev-ring-soft),
+      0 0 16px var(--terra-eg-sev-ring-soft);
+  }
+}
+
+.terra-eg-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  font-size: 0.875rem;
+  color: hsl(var(--muted-foreground));
+}
+
+.terra-eg-clip {
+  display: inline-block;
+  max-width: 22rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  vertical-align: bottom;
+}
+
+.terra-eg-link {
+  color: hsl(var(--primary));
+  text-decoration: underline;
+}
+
+.terra-eg-row {
+  cursor: pointer;
+}
+
+.terra-eg-row:hover td {
+  background: hsl(var(--surface-container-high) / 0.45);
+}
+
+.terra-eg-empty {
+  text-align: center;
+  color: hsl(var(--muted-foreground));
+  padding: 1.25rem !important;
+}
+
+.terra-eg-filter-banner {
+  margin: 0 0 0.75rem;
+  font-size: 0.875rem;
+  color: hsl(var(--muted-foreground));
+}
+
+.terra-eg-active-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+}
+
+.terra-eg-active-dot {
+  width: 0.45rem;
+  height: 0.45rem;
+  border-radius: 50%;
+  background: hsl(142 70% 48%);
+  box-shadow: 0 0 6px hsl(142 70% 48% / 0.65);
+}
+
+.terra-dg-chip--error {
+  background: hsl(0 62% 42% / 0.22);
+  color: hsl(0 85% 88%);
+  border: 1px solid hsl(0 70% 52% / 0.55);
+}
+
+.terra-eg-detail {
+  position: fixed;
+  inset: 0;
+  z-index: 1200;
+  background: hsl(215 45% 4% / 0.55);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 1rem;
+}
+
+.terra-eg-detail__panel {
+  width: min(720px, 100%);
+  max-height: 85vh;
+  overflow: auto;
+  background: hsl(var(--surface-container-high));
+  border: 1px solid hsl(var(--border) / 0.55);
+  border-radius: var(--md-sys-shape-corner-large);
+  padding: 1rem 1.15rem;
+  box-shadow: var(--md-sys-elevation-2);
+}
+
+.terra-eg-detail__head {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 1rem;
+  margin-bottom: 0.75rem;
+}
+
+.terra-eg-detail__title {
+  margin: 0;
+  font-size: 1.05rem;
+}
+
+.terra-eg-detail__summary {
+  margin: 0 0 0.85rem;
+  color: hsl(var(--foreground));
+  line-height: 1.45;
+}
+
+.terra-eg-detail__meta {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(10rem, 1fr));
+  gap: 0.65rem 1rem;
+  margin: 0;
+}
+
+.terra-eg-detail__meta dt {
+  font-size: 0.75rem;
+  color: hsl(var(--muted-foreground));
+  margin: 0;
+}
+
+.terra-eg-detail__meta dd {
+  margin: 0.15rem 0 0;
+}
+
+.terra-dg-muted {
+  color: hsl(var(--muted-foreground));
+}

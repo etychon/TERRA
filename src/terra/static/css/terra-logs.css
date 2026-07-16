@@ -4,6 +4,74 @@
   min-height: 60vh;
 }
 
+.terra-collector-status {
+  margin-top: 1rem;
+  padding: 0.85rem 1rem;
+  border-radius: var(--radius);
+  border: 1px solid hsl(var(--border) / 0.65);
+  background: hsl(var(--surface-container-low) / 0.75);
+}
+
+.terra-collector-status-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem 0.75rem;
+  margin-bottom: 0.65rem;
+}
+
+.terra-collector-status-title {
+  font-weight: 600;
+  color: hsl(var(--foreground));
+}
+
+.terra-collector-status-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(10rem, 1fr));
+  gap: 0.5rem 1rem;
+  margin: 0;
+}
+
+.terra-collector-status-grid dt {
+  font-size: 0.7rem;
+  color: hsl(var(--muted-foreground));
+  margin: 0;
+}
+
+.terra-collector-status-grid dd {
+  margin: 0.15rem 0 0;
+  font-family: "Roboto Mono", ui-monospace, monospace;
+  font-size: 0.75rem;
+  color: hsl(var(--foreground));
+}
+
+.terra-collector-status-hint {
+  margin: 0.65rem 0 0;
+  font-size: 0.8rem;
+  color: hsl(var(--muted-foreground));
+}
+
+.terra-chip--ok {
+  background: hsl(142 45% 22% / 0.35);
+  color: hsl(142 55% 72%);
+}
+
+.terra-chip--warn {
+  background: hsl(38 55% 22% / 0.35);
+  color: hsl(38 92% 62%);
+}
+
+.terra-chip--muted {
+  background: hsl(var(--muted) / 0.45);
+  color: hsl(var(--muted-foreground));
+}
+
+.terra-log-row--persisted .terra-log-component::after {
+  content: " · collector";
+  color: hsl(var(--muted-foreground));
+  font-size: 0.65rem;
+}
+
 .terra-logs-toolbar {
   display: flex;
   flex-wrap: wrap;
@@ -103,8 +171,12 @@
 .terra-log-detail {
   grid-column: 1 / -1;
   padding-left: 0.25rem;
-  color: hsl(var(--muted-foreground));
+  color: hsl(var(--foreground) / 0.82);
   font-size: 0.7rem;
+  border-left: 2px solid hsl(var(--primary) / 0.35);
+  margin-left: 0.15rem;
+  padding-top: 0.1rem;
+  padding-bottom: 0.1rem;
 }
 
 @media (max-width: 40rem) {

@@ -1,6 +1,7 @@
 {% extends "base.html" %}
 {% block extra_head %}
 <link rel="stylesheet" href="/static/css/terra-devices.css" />
+<link rel="stylesheet" href="/static/css/terra-events.css" />
 {% endblock %}
 {% block header_nav %}
 <span class="terra-header-user" title="{{ user.email }}">{{ user.email }}</span>
@@ -21,15 +22,45 @@
     <div
       id="terra-device-live-root"
       class="terra-device-live-root"
+      data-device-id="{{ device.id }}"
       data-poll-ms="{{ device_live_poll_interval_ms }}"
       data-live-url="/api/v1/me/devices/{{ device.id }}/live-sdwan"
+      data-live-stream-url="/api/v1/me/devices/{{ device.id }}/live-sdwan/stream"
+      data-sync-url="/api/v1/me/devices/{{ device.id }}/sync/async"
     >
       <div class="terra-device-live-toolbar">
+        <button type="button" id="terra-sync-now" class="terra-btn terra-btn--inline terra-btn--filled">
+          Sync now
+        </button>
         <button type="button" id="terra-live-toggle" class="terra-btn terra-btn--inline terra-btn--outlined" aria-pressed="false">
           <span class="terra-live-pulse-dot" id="terra-live-pulse-dot" aria-hidden="true"></span>
           <span id="terra-live-toggle-label">Show live data</span>
         </button>
         <span class="terra-muted terra-device-live-status" id="terra-live-status" role="status"></span>
+      </div>
+      <div id="terra-sync-progress" class="terra-live-progress terra-device-sync-progress" hidden aria-live="polite">
+        <div class="terra-live-progress-frame">
+          <div class="terra-live-progress-bar-head">
+            <div class="terra-live-progress-bar" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0">
+              <div class="terra-live-progress-fill" id="terra-sync-progress-fill"></div>
+            </div>
+            <span class="terra-live-progress-pct" id="terra-sync-progress-pct">0%</span>
+          </div>
+          <div class="terra-live-progress-scan" aria-hidden="true"></div>
+          <p class="terra-device-sync-status" id="terra-sync-status-text"></p>
+        </div>
+      </div>
+      <div id="terra-live-progress" class="terra-live-progress" hidden aria-live="polite">
+        <div class="terra-live-progress-frame">
+          <div class="terra-live-progress-bar-head">
+            <div class="terra-live-progress-bar" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0">
+              <div class="terra-live-progress-fill" id="terra-live-progress-fill"></div>
+            </div>
+            <span class="terra-live-progress-pct" id="terra-live-progress-pct">0%</span>
+          </div>
+          <div class="terra-live-progress-scan" aria-hidden="true"></div>
+          <ol class="terra-live-steps" id="terra-live-steps"></ol>
+        </div>
       </div>
       <div id="terra-live-panel" class="terra-live-panel" hidden></div>
     </div>
@@ -53,6 +84,25 @@
         <dd><time class="terra-local-time" data-utc="{{ synced_iso }}">{{ synced_iso }}</time></dd>
       </div>
     </dl>
+
+    <section
+      id="terra-device-governance-root"
+      class="terra-governance-panel"
+      data-device-id="{{ device.id }}"
+      aria-labelledby="terra-device-governance-heading"
+    >
+      <div class="terra-governance-panel__head">
+        <h2 id="terra-device-governance-heading" class="terra-section-title">Recent alarms &amp; events</h2>
+        <a class="terra-btn terra-btn--inline terra-btn--outlined" href="/events?device_id={{ device.id }}">View all in Events</a>
+      </div>
+      <p class="terra-muted terra-detail-hint">
+        Last 24 hours from the TERRA projection (collector syncs Manager alarms, events, and audit on a timer).
+      </p>
+      <span id="terra-device-governance-status" class="terra-muted" role="status"></span>
+      <div id="terra-device-governance-body">
+        <p class="terra-muted">Loading recent events…</p>
+      </div>
+    </section>
 
     <section
       id="terra-cellular-history-root"
@@ -217,6 +267,8 @@
 {% block extra_scripts %}
 <script src="/static/vendor/echarts.min.js"></script>
 <script src="/static/js/terra-datetime-local.js"></script>
+<script src="/static/js/terra-device-detail-sync.js"></script>
 <script src="/static/js/terra-device-detail-live.js"></script>
+<script src="/static/js/terra-device-governance.js"></script>
 <script src="/static/js/terra-device-cellular.js"></script>
 {% endblock %}

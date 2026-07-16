@@ -13,8 +13,14 @@ from terra.config import get_settings
 from terra.crud_sdwan import get_sdwan_manager
 from terra.db import get_session_factory
 from terra.inventory_extract import utc_iso_for_json
-from terra.models import SdWanLinkStatus
-from terra_sdwan.sdwan_sync import SdWanSyncCancelled, sync_devices_for_instance
+from terra.models import SdWanLinkStatus, SdWanManagerInstance, SyncedDevice
+from terra_sdwan.sdwan_sync import (
+    SdWanSyncCancelled,
+    sync_cellular_history_best_effort,
+    sync_devices_for_instance,
+    sync_synced_device_detail,
+)
+from terra_sdwan.sdwan_sync_instance_gate import user_priority_instance_sync
 
 _jobs_lock = threading.Lock()
 _jobs: dict[str, dict[str, Any]] = {}
@@ -116,6 +122,7 @@ def _run_job(job_id: str, user_id: int, instance_id: int, secret_key: str) -> No
 
     try:
         notify("connecting", 5, "Connecting to SD-WAN Manager…")
+        cellular_stats: dict[str, Any] | None = None
         sf = get_session_factory()
         with sf() as db:
             inst = get_sdwan_manager(db, user_id, instance_id)
@@ -140,6 +147,9 @@ def _run_job(job_id: str, user_id: int, instance_id: int, secret_key: str) -> No
                     progress_notify=notify,
                     cancel_check=cancel_check,
                 )
+                if err is None:
+                    notify("cellular", 92, "Refreshing cellular history…")
+                    cellular_stats = sync_cellular_history_best_effort(db, secret_key, inst)
             except SdWanSyncCancelled:
                 db.rollback()
                 with _jobs_lock:
@@ -183,6 +193,12 @@ def _run_job(job_id: str, user_id: int, instance_id: int, secret_key: str) -> No
             f"Job {job_id} completed",
             detail=(
                 f'cluster="{inst.display_name}" rows={n} errors={1 if err else 0} detail={err or ""}'
+                + (
+                    f" cellular_buckets={int((cellular_stats or {}).get('buckets_pushed') or 0)}"
+                    f" cellular_errors={int((cellular_stats or {}).get('errors') or 0)}"
+                    if cellular_stats
+                    else ""
+                )
             )[:4000],
         )
     except Exception as e:
@@ -209,6 +225,114 @@ def _run_job(job_id: str, user_id: int, instance_id: int, secret_key: str) -> No
         append_event("ERROR", "sdwan_sync_job", f"Job {job_id} failed", detail=detail)
 
 
+def _run_device_job(job_id: str, user_id: int, device_id: int, secret_key: str) -> None:
+    with _jobs_lock:
+        j0 = _jobs.get(job_id)
+        if j0 is None:
+            return
+        if j0.get("cancel_requested"):
+            j0["status"] = "cancelled"
+            j0["phase"] = "cancelled"
+            j0["percent"] = 0
+            j0["message"] = "Cancelled before start."
+            j0["finished_at"] = time.time()
+            return
+        j0["status"] = "running"
+        j0["phase"] = "running"
+        j0["percent"] = 0
+        j0["message"] = "Starting device sync…"
+
+    def notify(phase: str, percent: int, message: str) -> None:
+        with _jobs_lock:
+            jj = _jobs.get(job_id)
+            if jj is not None:
+                jj["phase"] = phase
+                jj["percent"] = percent
+                jj["message"] = message
+
+    def cancel_check() -> bool:
+        with _jobs_lock:
+            jj = _jobs.get(job_id)
+            return bool(jj and jj.get("cancel_requested"))
+
+    try:
+        notify("connecting", 5, "Resolving device and Manager…")
+        sf = get_session_factory()
+        with sf() as db:
+            device = db.get(SyncedDevice, device_id)
+            if device is None:
+                raise RuntimeError("Device not found")
+            inst = db.get(SdWanManagerInstance, device.sdwan_instance_id)
+            if inst is None:
+                raise RuntimeError("SD-WAN manager not found for this device")
+            if inst.link_status != SdWanLinkStatus.connected.value:
+                raise RuntimeError("Manager is not in connected state — run Verify first")
+            with _jobs_lock:
+                jj = _jobs.get(job_id)
+                if jj is not None:
+                    jj["instance_id"] = inst.id
+            append_event(
+                "INFO",
+                "sdwan_device_sync_job",
+                f"Device job {job_id} started",
+                detail=f"user={user_id} device_id={device_id} cluster={inst.display_name!r}",
+            )
+            with user_priority_instance_sync(inst.id):
+                try:
+                    ok, err = sync_synced_device_detail(
+                        db,
+                        secret_key,
+                        device,
+                        inst,
+                        progress_notify=notify,
+                        cancel_check=cancel_check,
+                    )
+                except SdWanSyncCancelled:
+                    db.rollback()
+                    with _jobs_lock:
+                        jj = _jobs.get(job_id)
+                        if jj is not None:
+                            jj["status"] = "cancelled"
+                            jj["phase"] = "cancelled"
+                            jj["message"] = "Cancelled by user."
+                            jj["finished_at"] = time.time()
+                    return
+                if not ok:
+                    raise RuntimeError(err or "Device sync failed")
+                db.commit()
+                db.refresh(device)
+
+        with _jobs_lock:
+            jj = _jobs[job_id]
+            jj["rows_touched"] = 1
+            jj["errors"] = 0
+            jj["error_detail"] = None
+            jj["status"] = "done"
+            jj["phase"] = "done"
+            jj["percent"] = 100
+            jj["message"] = "Device sync finished."
+            jj["finished_at"] = time.time()
+        append_event(
+            "INFO",
+            "sdwan_device_sync_job",
+            f"Device job {job_id} completed",
+            detail=f"device_id={device_id}",
+        )
+    except Exception as e:
+        msg = str(e)[:500]
+        with _jobs_lock:
+            jfail = _jobs.get(job_id)
+            if jfail is not None:
+                jfail["status"] = "failed"
+                jfail["phase"] = "failed"
+                jfail["percent"] = 100
+                jfail["message"] = msg
+                jfail["errors"] = 1
+                jfail["error_detail"] = msg
+                jfail["finished_at"] = time.time()
+        append_event("ERROR", "sdwan_device_sync_job", f"Device job {job_id} failed", detail=msg)
+
+
 def start_job(user_id: int, instance_id: int) -> str:
     """Queue a sync job; returns opaque ``job_id``."""
     secret_key = get_settings().secret_key
@@ -232,6 +356,33 @@ def start_job(user_id: int, instance_id: int) -> str:
             "cancel_requested": False,
         }
     _get_executor().submit(_run_job, job_id, user_id, instance_id, secret_key)
+    return job_id
+
+
+def start_device_job(user_id: int, device_id: int) -> str:
+    """Queue a per-device inventory enrich + cellular history job."""
+    secret_key = get_settings().secret_key
+    job_id = secrets.token_urlsafe(18)
+    now = time.time()
+    with _jobs_lock:
+        _prune_jobs_locked()
+        _jobs[job_id] = {
+            "user_id": user_id,
+            "instance_id": None,
+            "device_id": device_id,
+            "status": "queued",
+            "phase": "queued",
+            "percent": 0,
+            "message": "Queued…",
+            "created_at": now,
+            "finished_at": None,
+            "rows_touched": None,
+            "errors": None,
+            "error_detail": None,
+            "last_sync_at_utc": None,
+            "cancel_requested": False,
+        }
+    _get_executor().submit(_run_device_job, job_id, user_id, device_id, secret_key)
     return job_id
 
 

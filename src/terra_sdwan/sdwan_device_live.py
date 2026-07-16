@@ -5,6 +5,8 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import time
+from collections.abc import Callable
 from typing import Any
 
 import httpx
@@ -13,6 +15,11 @@ from terra.inventory_extract import _pick, _row_from_interface_dict
 from terra_sdwan.sdwan_dataservice_rows import rows_from_dataservice_body
 
 logger = logging.getLogger(__name__)
+
+LiveProgressFn = Callable[[dict[str, Any]], None]
+
+_LIVE_STEP_RESOLVE = ("resolve_id", "Resolve device identifier")
+_LIVE_STEP_INTERFACES = ("interfaces", "Network interfaces")
 
 # vManage uses `deviceId` (typically system IP, sometimes UUID) on per-device dataservice URLs.
 _DEVICE_ID_SOURCE_KEYS: tuple[str, ...] = (
@@ -243,12 +250,50 @@ def _table_from_dict_rows(
     return {"columns": columns, "rows": data}
 
 
+def _live_step_id(title: str, path: str) -> str:
+    slug = path.replace("dataservice/", "").replace("/", "_")
+    return f"cellular_{slug}" if "cellular" in path else f"wan_{slug}"
+
+
+def _emit_live_step(
+    progress: LiveProgressFn | None,
+    *,
+    step_id: str,
+    label: str,
+    status: str,
+    elapsed_ms: float = 0.0,
+    detail: str | None = None,
+) -> None:
+    if progress is None:
+        return
+    payload: dict[str, Any] = {
+        "type": "step",
+        "step_id": step_id,
+        "label": label,
+        "status": status,
+        "elapsed_ms": round(max(0.0, elapsed_ms), 1),
+    }
+    if detail:
+        payload["detail"] = detail
+    progress(payload)
+
+
+def _step_timer() -> tuple[float, Callable[[], float]]:
+    start = time.perf_counter()
+
+    def elapsed_ms() -> float:
+        return (time.perf_counter() - start) * 1000.0
+
+    return start, elapsed_ms
+
+
 def fetch_live_device_dashboard(
     client: httpx.Client,
     base_url: str,
     inventory: dict[str, Any],
     *,
     request_timeout: float = 45.0,
+    progress: LiveProgressFn | None = None,
 ) -> tuple[list[dict[str, str]], list[dict[str, Any]], str | None]:
     """
     Pull interfaces and cellular/WAN tables from Manager for the device inventory row.
@@ -257,11 +302,41 @@ def fetch_live_device_dashboard(
     (success, partial, or skip reason). Empty lists mean fall back to cached inventory JSON in the UI.
     """
     candidates = vmanage_device_id_candidates(inventory)
+    _emit_live_step(
+        progress,
+        step_id=_LIVE_STEP_RESOLVE[0],
+        label=_LIVE_STEP_RESOLVE[1],
+        status="running",
+    )
     if not candidates:
+        _emit_live_step(
+            progress,
+            step_id=_LIVE_STEP_RESOLVE[0],
+            label=_LIVE_STEP_RESOLVE[1],
+            status="done",
+            detail="No device identifier in inventory JSON",
+        )
         return [], [], "Live Manager APIs need a device identifier (system-ip or uuid) in inventory JSON."
+    resolve_detail = ", ".join(candidates[:3])
+    if len(candidates) > 3:
+        resolve_detail += f" (+{len(candidates) - 3} more)"
+    _emit_live_step(
+        progress,
+        step_id=_LIVE_STEP_RESOLVE[0],
+        label=_LIVE_STEP_RESOLVE[1],
+        status="done",
+        detail=resolve_detail,
+    )
 
     interface_rows: list[dict[str, str]] = []
     used_id: str | None = None
+    _emit_live_step(
+        progress,
+        step_id=_LIVE_STEP_INTERFACES[0],
+        label=_LIVE_STEP_INTERFACES[1],
+        status="running",
+    )
+    _, _iface_elapsed = _step_timer()
     for dev_id in candidates:
         for path in _INTERFACE_PATHS:
             raw_rows = _rows_from_get(client, base_url, path, dev_id, timeout=request_timeout)
@@ -276,16 +351,45 @@ def fetch_live_device_dashboard(
                 break
         if interface_rows:
             break
+    if interface_rows:
+        iface_detail = f"{len(interface_rows)} interface(s)"
+        if used_id:
+            iface_detail += f" · deviceId {used_id}"
+    else:
+        iface_detail = "No rows from interface endpoints"
+    _emit_live_step(
+        progress,
+        step_id=_LIVE_STEP_INTERFACES[0],
+        label=_LIVE_STEP_INTERFACES[1],
+        status="done",
+        elapsed_ms=_iface_elapsed(),
+        detail=iface_detail,
+    )
 
     sections: list[dict[str, Any]] = []
     if used_id is None:
         used_id = candidates[0]
 
     for title, path in _CELLULAR_PATHS + _EXTRA_PATHS:
+        step_id = _live_step_id(title, path)
+        _emit_live_step(progress, step_id=step_id, label=title, status="running")
+        _, step_elapsed = _step_timer()
         raw_rows = _rows_from_get(client, base_url, path, used_id, timeout=request_timeout)
         tbl = _table_from_dict_rows(raw_rows)
         if tbl:
             sections.append({"title": title, **tbl})
+            row_count = len(tbl.get("rows") or [])
+            detail = f"{row_count} row(s)"
+        else:
+            detail = "No rows"
+        _emit_live_step(
+            progress,
+            step_id=step_id,
+            label=title,
+            status="done",
+            elapsed_ms=step_elapsed(),
+            detail=detail,
+        )
 
     if interface_rows and sections:
         note = "Interfaces and tables loaded live from SD-WAN Manager."

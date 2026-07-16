@@ -41,7 +41,7 @@ flowchart LR
 
 1. **`web`:** TLS termination only; proxies to **`core:8000`** on the internal network.
 2. **`core`:** FastAPI app — sessions, RBAC, Jinja/API routes, on-demand SD-WAN sync jobs triggered by users. **Does not** start the periodic Manager inventory loop (`TERRA_SDWAN_BACKGROUND_SYNC=false` in default Compose for this service).
-3. **`collector`:** Long-running worker — same Python install, **`TERRA_SDWAN_BACKGROUND_SYNC=true`**, periodic `sync_all_connected_managers`, **VictoriaMetrics** push for sparse operational gauges (inventory counts, sync success timestamps). Horizontally scalable later via sharded managers + a queue (not required in v1).
+3. **`collector`:** Long-running worker — same Python install, **`TERRA_SDWAN_BACKGROUND_SYNC=true`**, periodic `sync_all_connected_managers`, **VictoriaMetrics** push for sparse operational gauges (inventory counts, sync success timestamps). Writes **`collector_status`** heartbeat and persists periodic **`sdwan_sync_batch`** log lines to Postgres for the admin Logs UI on **`core`**. Docker healthcheck uses heartbeat freshness (`scripts/collector_healthcheck.py`). Horizontally scalable later via sharded managers + a queue (not required in v1).
 4. **`postgres`:** Default **relational** store in Compose for `core` and `collector` (replaces SQLite for multi-writer and larger fleets). Local dev may still use SQLite when not using full Compose data tier.
 5. **`victoriametrics`:** Long-retention **metrics** store; PromQL-compatible API. Details: [`specs/telemetry-storage.md`](telemetry-storage.md).
 6. **`grafana` (optional profile `grafana`):** Pre-wired datasource to VictoriaMetrics for partner/power-user dashboards.
@@ -62,7 +62,7 @@ flowchart LR
 - **Operator UI** follows `specs/design-system.md` (Tailwind + shadcn-style CSS variables, token layers, automated guardrails) and ships with the same **Compose**-first story as the API services.
 - **Docker Compose** is the **mandatory** default way to run the delivered application stack (services, dependencies, documented `up` / `down` workflow).
 - **Canonical command (repo root):** `docker compose up --build -d` — brings up all defined services; default **user-facing WebUI** is **`https://localhost:4434`** (nginx TLS edge → **`core`**). Override host port via `TERRA_HTTPS_PORT` in `.env`. Default certificate is **self-signed**; operators may drop **`server.crt` / `server.key`** PEMs into `docker/certs/` before start. Liveness: **`GET /health`** through the HTTPS edge.
-- **Admin operator logs:** in-memory ring buffer with `/admin/logs` and `GET /api/v1/admin/logs` (see `specs/logging-ui.md`); not a durable audit trail across process restarts.
+- **Admin operator logs:** merged in-memory ring buffer (core) + persisted collector batch lines (Postgres); `/admin/logs`, `GET /api/v1/admin/logs`, `GET /api/v1/admin/collector-status` (see `specs/logging-ui.md`); not a full SIEM audit trail.
 - **Platforms:** **macOS**, **Linux**, and **Windows** (support **Docker Desktop** with the WSL2-backed engine as the documented Windows model).
 - **CPU:** images and Compose must support **amd64** and **arm64** (including **Apple Silicon** Macs).
 

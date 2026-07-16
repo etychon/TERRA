@@ -9,6 +9,7 @@ from typing import Any
 
 from sqlalchemy import create_engine, select, text
 from sqlalchemy.engine import Engine
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.pool import StaticPool
 
@@ -20,6 +21,7 @@ logger = logging.getLogger(__name__)
 
 _engine: Engine | None = None
 SessionLocal: sessionmaker[Session] | None = None
+_postgres_migrations_applied = False
 
 
 def _sqlite_is_memory(database_url: str) -> bool:
@@ -105,17 +107,75 @@ def _sqlite_add_missing_columns(engine: Engine) -> None:
                 logger.info("Applied SQLite patch: synced_devices.cellular_stats_cursor")
 
 
+_POSTGRES_INIT_LOCK_ID = 74822101
+
+
+def _create_schema(engine: Engine) -> None:
+    """Create tables; serialize on Postgres when core and collector start together."""
+    url = str(engine.url)
+    if url.startswith("postgresql"):
+        with engine.begin() as conn:
+            conn.execute(text("SELECT pg_advisory_lock(:lock_id)"), {"lock_id": _POSTGRES_INIT_LOCK_ID})
+            try:
+                Base.metadata.create_all(bind=conn)
+            except IntegrityError as exc:
+                # Another process may have created the same table/type between check and CREATE.
+                if "pg_type_typname_nsp_index" not in str(exc.orig):
+                    raise
+                logger.warning("Concurrent schema init race ignored: %s", exc.orig)
+            finally:
+                conn.execute(text("SELECT pg_advisory_unlock(:lock_id)"), {"lock_id": _POSTGRES_INIT_LOCK_ID})
+        return
+    Base.metadata.create_all(bind=engine)
+
+
+def _postgres_governance_migrations(engine: Engine) -> None:
+    """Postgres-only patches for governance tables (create_all does not ALTER)."""
+    if not str(engine.url).startswith("postgresql"):
+        return
+    with engine.begin() as conn:
+        col = conn.execute(
+            text(
+                "SELECT data_type FROM information_schema.columns "
+                "WHERE table_schema = current_schema() "
+                "AND table_name = 'sdwan_governance_sync_state' "
+                "AND column_name = 'last_entry_time_ms'"
+            )
+        ).scalar()
+        if col == "integer":
+            conn.execute(
+                text(
+                    "ALTER TABLE sdwan_governance_sync_state "
+                    "ALTER COLUMN last_entry_time_ms TYPE BIGINT"
+                )
+            )
+            logger.info("Applied Postgres patch: sdwan_governance_sync_state.last_entry_time_ms BIGINT")
+
+
 def _postgres_add_missing_columns(engine: Engine) -> None:
     """Lightweight ALTER for Postgres deployments (create_all does not migrate)."""
+    global _postgres_migrations_applied
+    if _postgres_migrations_applied:
+        return
     url = str(engine.url)
     if not url.startswith("postgresql"):
         return
     with engine.begin() as conn:
-        conn.execute(
+        exists = conn.execute(
             text(
-                "ALTER TABLE synced_devices ADD COLUMN IF NOT EXISTS cellular_stats_cursor TEXT"
+                "SELECT 1 FROM information_schema.columns "
+                "WHERE table_schema = current_schema() "
+                "AND table_name = 'synced_devices' "
+                "AND column_name = 'cellular_stats_cursor'"
             )
-        )
+        ).scalar()
+        if exists is None:
+            conn.execute(
+                text(
+                    "ALTER TABLE synced_devices ADD COLUMN IF NOT EXISTS cellular_stats_cursor TEXT"
+                )
+            )
+    _postgres_migrations_applied = True
 
 
 def _sqlite_migrate_synced_devices_multitenant(engine: Engine) -> None:
@@ -186,7 +246,8 @@ def _sqlite_migrate_synced_devices_multitenant(engine: Engine) -> None:
 
 def init_db() -> None:
     eng = get_engine()
-    Base.metadata.create_all(bind=eng)
+    _create_schema(eng)
+    _postgres_governance_migrations(eng)
     _sqlite_add_missing_columns(eng)
     _sqlite_migrate_synced_devices_multitenant(eng)
     _postgres_add_missing_columns(eng)

@@ -149,6 +149,17 @@ class Settings(BaseSettings):
         default="-65,-75,-85",
         description="Comma-separated RSSI (dBm) cutoffs for excellent/good/fair/poor (descending).",
     )
+    governance_sync_enabled: bool = Field(
+        default=True,
+        description="When True, collector periodically ingests Manager alarms/events/audit into Postgres.",
+    )
+    governance_sync_interval_seconds: int = Field(default=300, ge=60, le=86400)
+    governance_backfill_hours: int = Field(default=24, ge=1, le=168)
+    governance_overlap_minutes: int = Field(default=15, ge=1, le=120)
+    governance_http_timeout_seconds: float = Field(default=45.0, ge=5.0, le=120.0)
+    governance_query_size: int = Field(default=2000, ge=100, le=10000)
+    governance_retention_days: int = Field(default=30, ge=1, le=365)
+
 
 @lru_cache
 def get_settings() -> Settings:

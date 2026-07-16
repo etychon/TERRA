@@ -161,3 +161,73 @@ def test_sync_api_returns_stats(client: TestClient, monkeypatch: pytest.MonkeyPa
     assert d.status_code == 200
     assert "edge-test-1" in d.text
     assert 'class="terra-manager-fields"' in d.text
+    assert "terra-sync-now" in d.text
+
+
+def test_device_sync_async_requires_auth() -> None:
+    from terra.main import app
+
+    with TestClient(app) as c:
+        assert c.post("/api/v1/me/devices/1/sync/async").status_code == 401
+
+
+def test_device_sync_async_queues_job(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
+    import time
+
+    from terra_sdwan import sdwan_sync_job_runner as runner
+
+    _login(client)
+    sf = get_session_factory()
+    with sf() as db:
+        user = db.execute(select(User).where(User.email == os.environ["TERRA_ADMIN_EMAIL"])).scalar_one()
+        blob = encrypt_json(
+            os.environ["TERRA_SECRET_KEY"],
+            {"mode": SdWanAuthMode.jwt.value, "token": "dummy.jwt.token"},
+        )
+        inst = SdWanManagerInstance(
+            user_id=user.id,
+            display_name="DeviceSyncMgr",
+            base_url="https://vmanager.test.invalid",
+            auth_mode=SdWanAuthMode.jwt.value,
+            credentials_encrypted=blob,
+            verify_tls=True,
+            link_status=SdWanLinkStatus.connected.value,
+        )
+        db.add(inst)
+        db.flush()
+        from datetime import UTC, datetime
+
+        now = datetime.now(tz=UTC)
+        dev = SyncedDevice(
+            sdwan_instance_id=inst.id,
+            source_device_uuid="edge-sync-1",
+            hostname="edge-sync",
+            device_type="vedge",
+            reachability="reachable",
+            state_changed_at_utc=now,
+            synced_at_utc=now,
+            raw_json='{"uuid":"edge-sync-1","system-ip":"10.1.2.3"}',
+        )
+        db.add(dev)
+        db.commit()
+        device_id = dev.id
+
+    ran: list[int] = []
+
+    def fake_run(job_id: str, user_id: int, device_id_arg: int, secret_key: str) -> None:
+        ran.append(device_id_arg)
+        snap = runner.get_job(job_id, user_id)
+        assert snap is not None
+
+    monkeypatch.setattr(runner, "_run_device_job", fake_run)
+
+    r = client.post(f"/api/v1/me/devices/{device_id}/sync/async")
+    assert r.status_code == 200
+    job_id = r.json()["job_id"]
+    assert job_id
+
+    for _ in range(30):
+        if ran:
+            break
+        time.sleep(0.05)
+    assert ran == [device_id]

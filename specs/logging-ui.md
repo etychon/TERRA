@@ -5,11 +5,17 @@
 - **Admin-only** HTML at `/admin/logs` and JSON feed at `GET /api/v1/admin/logs` (requires `admin` role or superuser session).
 - Logs are **in-memory** (ring buffer, default 3000 rows) and reset on process restart — suitable for operator troubleshooting, **not** compliance archival or security forensics.
 - **Durable audit** (who changed RBAC, who exported sensitive reports) belongs in **PostgreSQL** (or an external SIEM) once productized; do not treat this ring buffer as the audit system of record — see [`specs/architecture.md`](architecture.md) secrets and service boundaries.
-- **HTTP access lines** (component `http`) are captured for selected paths; high-frequency pollers (`/sync-sdwan-jobs/`, `/api/v1/admin/logs`, `/map-devices-telemetry`) are excluded to avoid buffer flooding.
+- **HTTP access lines** (component `http`) are captured for selected paths; high-frequency pollers (`/sync-sdwan-jobs/`, `/api/v1/admin/logs`, `/api/v1/admin/collector-status`, `/map-devices-telemetry`) are excluded to avoid buffer flooding.
 
 ## Feed order
 
-- **API and UI** present the ring buffer **newest-first** (highest `seq` first). Incremental polling still uses `since_seq`; the server returns only rows with `seq > since_seq`, ordered newest-first within the batch.
+- **API and UI** present the merged feed **newest-first**. Incremental polling uses two cursors: `since` (in-memory ring `seq`) and `since_db` (persisted `app_log_events.id`). Persisted collector rows use synthetic `seq = 1_000_000_000 + id` for stable ordering in the UI.
+
+## Collector visibility
+
+- **`collector`** (Compose) writes a Postgres singleton **`collector_status`** (heartbeat + last periodic batch summary) and persists **`sdwan_sync_batch`** rows with `batch_kind=periodic` into **`app_log_events`** so **`core`** can show them on `/admin/logs`.
+- **`GET /api/v1/admin/collector-status`** returns `state` (`alive` | `stale` | `never`): **stale** when `now - last_heartbeat_at > 2 × interval_seconds`.
+- Logs page shows a **Background collector** status strip (heartbeat, interval, last batch ok/warn/err/rows, cellular bucket counts) and a **Show batch logs** shortcut (`*sdwan_sync_batch*`).
 
 ## SD-WAN context in logs
 
@@ -19,7 +25,7 @@
 ## SD-WAN periodic batch (`sdwan_sync_batch`)
 
 - Emitted when **all connected managers** are synced (**`collector`** background loop in default Compose) or when a user runs **Sync all** (`POST /api/v1/me/sync-sdwan-devices`) on **`core`**.
-- **Detail** conventions (plain text, grep-friendly): `run_id=<hex>` (correlates one batch tick), `managers=<n>`, `max_concurrent=<k>`, `batch_kind=periodic|user_bulk`, per-instance lines include `instance_id`, `cluster="..."`, `duration_ms`, `rows`, and optional `error=`.
+- **Detail** conventions (plain text, grep-friendly): `run_id=<hex>` (correlates one batch tick), `managers=<n>`, `max_concurrent=<k>`, `batch_kind=periodic|user_bulk`, per-instance lines include `instance_id`, `cluster="..."`, `duration_ms`, `rows`, optional `error=`, and when cellular ran: `cellular_buckets=`, `cellular_errors=`, `cellular_fetched=`.
 - **Levels**: `INFO` batch start/end and per-manager success; `WARNING` per-manager sync returned an error string; `ERROR` worker crash / future failure.
 
 ## Search

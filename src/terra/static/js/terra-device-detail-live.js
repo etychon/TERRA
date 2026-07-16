@@ -218,17 +218,229 @@
     return;
   }
   const url = root.getAttribute("data-live-url");
+  const streamUrl = root.getAttribute("data-live-stream-url") || (url ? url + "/stream" : "");
   const pollMs = Math.max(3000, parseInt(String(root.getAttribute("data-poll-ms") || "5000"), 10) || 5000);
   const btn = document.getElementById("terra-live-toggle");
   const label = document.getElementById("terra-live-toggle-label");
   const statusEl = document.getElementById("terra-live-status");
   const panel = document.getElementById("terra-live-panel");
+  const progressRoot = document.getElementById("terra-live-progress");
+  const progressFill = document.getElementById("terra-live-progress-fill");
+  const progressPct = document.getElementById("terra-live-progress-pct");
+  const progressBar = progressRoot ? progressRoot.querySelector(".terra-live-progress-bar") : null;
+  const stepsList = document.getElementById("terra-live-steps");
   if (!btn || !panel || !url || !label || !statusEl) {
     return;
   }
 
+  const LIVE_STEP_ORDER = [
+    { step_id: "connect", label: "Connect to SD-WAN Manager" },
+    { step_id: "resolve_id", label: "Resolve device identifier" },
+    { step_id: "interfaces", label: "Network interfaces" },
+    { step_id: "cellular_device_cellular_modem", label: "Cellular modem" },
+    { step_id: "cellular_device_cellular_network", label: "Cellular network" },
+    { step_id: "cellular_device_cellular_radio", label: "Cellular radio" },
+    { step_id: "cellular_device_cellular_status", label: "Cellular status" },
+    { step_id: "cellular_device_cellular_sessions", label: "Cellular sessions" },
+    { step_id: "cellular_device_cellular_profiles", label: "Cellular profiles" },
+    { step_id: "wan_device_control_waninterface", label: "WAN (control)" },
+  ];
+
   let active = false;
   let timer = null;
+  let pollGeneration = 0;
+  let stepState = {};
+  let tickTimer = null;
+
+  function formatElapsed(ms) {
+    const n = Math.max(0, Number(ms) || 0);
+    if (n < 1000) {
+      return n.toFixed(0) + " ms";
+    }
+    return (n / 1000).toFixed(n >= 10000 ? 0 : 1) + " s";
+  }
+
+  function resetProgressUi() {
+    stepState = {};
+    if (stepsList) {
+      stepsList.innerHTML = "";
+      for (let i = 0; i < LIVE_STEP_ORDER.length; i++) {
+        const def = LIVE_STEP_ORDER[i];
+        stepState[def.step_id] = {
+          label: def.label,
+          status: "pending",
+          elapsed_ms: 0,
+          detail: "",
+          started_at: null,
+        };
+        const li = document.createElement("li");
+        li.className = "terra-live-step terra-live-step--pending";
+        li.setAttribute("data-step-id", def.step_id);
+        li.innerHTML =
+          '<span class="terra-live-step__icon" aria-hidden="true"></span>' +
+          '<span class="terra-live-step__label">' +
+          escapeHtml(def.label) +
+          "</span>" +
+          '<span class="terra-live-step__elapsed">—</span>' +
+          '<span class="terra-live-step__detail" hidden></span>';
+        stepsList.appendChild(li);
+      }
+    }
+    if (progressFill) {
+      progressFill.style.width = "0%";
+    }
+    if (progressPct) {
+      progressPct.textContent = "0%";
+    }
+    if (progressBar) {
+      progressBar.setAttribute("aria-valuenow", "0");
+    }
+  }
+
+  function progressPercent() {
+    const ids = LIVE_STEP_ORDER.map(function (s) {
+      return s.step_id;
+    });
+    let done = 0;
+    for (let i = 0; i < ids.length; i++) {
+      const st = stepState[ids[i]];
+      if (st && st.status === "done") {
+        done += 1;
+      }
+    }
+    return Math.round((done / Math.max(1, ids.length)) * 100);
+  }
+
+  function applyProgressPercent() {
+    const pct = progressPercent();
+    if (progressFill) {
+      progressFill.style.width = pct + "%";
+    }
+    if (progressPct) {
+      progressPct.textContent = pct + "%";
+    }
+    if (progressBar) {
+      progressBar.setAttribute("aria-valuenow", String(pct));
+    }
+  }
+
+  function renderStepRow(stepId) {
+    if (!stepsList) {
+      return;
+    }
+    const st = stepState[stepId];
+    if (!st) {
+      return;
+    }
+    const li = stepsList.querySelector('[data-step-id="' + stepId + '"]');
+    if (!li) {
+      return;
+    }
+    li.className = "terra-live-step terra-live-step--" + st.status;
+    const elapsedEl = li.querySelector(".terra-live-step__elapsed");
+    const detailEl = li.querySelector(".terra-live-step__detail");
+    if (elapsedEl) {
+      if (st.status === "pending") {
+        elapsedEl.textContent = "—";
+      } else if (st.status === "running") {
+        elapsedEl.textContent = formatElapsed(st.elapsed_ms);
+      } else {
+        elapsedEl.textContent = formatElapsed(st.elapsed_ms);
+      }
+    }
+    if (detailEl) {
+      if (st.detail) {
+        detailEl.textContent = st.detail;
+        detailEl.hidden = false;
+      } else {
+        detailEl.textContent = "";
+        detailEl.hidden = true;
+      }
+    }
+    applyProgressPercent();
+  }
+
+  function startProgressTick() {
+    if (tickTimer) {
+      window.clearInterval(tickTimer);
+    }
+    tickTimer = window.setInterval(function () {
+      const now = Date.now();
+      let anyRunning = false;
+      for (const stepId in stepState) {
+        if (!Object.prototype.hasOwnProperty.call(stepState, stepId)) {
+          continue;
+        }
+        const st = stepState[stepId];
+        if (st.status === "running" && st.started_at) {
+          st.elapsed_ms = now - st.started_at;
+          renderStepRow(stepId);
+          anyRunning = true;
+        }
+      }
+      if (!anyRunning && tickTimer) {
+        window.clearInterval(tickTimer);
+        tickTimer = null;
+      }
+    }, 100);
+  }
+
+  function stopProgressTick() {
+    if (tickTimer) {
+      window.clearInterval(tickTimer);
+      tickTimer = null;
+    }
+  }
+
+  function applyStepEvent(ev) {
+    if (!ev || ev.type !== "step") {
+      return;
+    }
+    const stepId = String(ev.step_id || "");
+    if (!stepState[stepId]) {
+      stepState[stepId] = {
+        label: String(ev.label || stepId),
+        status: "pending",
+        elapsed_ms: 0,
+        detail: "",
+        started_at: null,
+      };
+    }
+    const st = stepState[stepId];
+    if (ev.label) {
+      st.label = String(ev.label);
+    }
+    const status = String(ev.status || "running");
+    if (status === "running") {
+      st.status = "running";
+      st.started_at = Date.now();
+      st.elapsed_ms = 0;
+      startProgressTick();
+    } else if (status === "done") {
+      st.status = "done";
+      st.elapsed_ms = typeof ev.elapsed_ms === "number" ? ev.elapsed_ms : st.elapsed_ms;
+      st.started_at = null;
+      if (ev.detail) {
+        st.detail = String(ev.detail);
+      }
+    }
+    renderStepRow(stepId);
+  }
+
+  function showProgressUi() {
+    if (progressRoot) {
+      progressRoot.hidden = false;
+    }
+    resetProgressUi();
+    statusEl.textContent = "Collecting live data from Manager…";
+  }
+
+  function hideProgressUi() {
+    stopProgressTick();
+    if (progressRoot) {
+      progressRoot.hidden = true;
+    }
+  }
 
   function scheduleNext() {
     if (!active) {
@@ -240,26 +452,96 @@
     timer = window.setTimeout(runPoll, pollMs);
   }
 
+  async function consumeNdjsonStream(response, generation) {
+    if (!response.body) {
+      throw new Error("Streaming not supported");
+    }
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = "";
+    let finalPayload = null;
+
+    while (true) {
+      const chunk = await reader.read();
+      if (chunk.done) {
+        break;
+      }
+      if (!active || generation !== pollGeneration) {
+        try {
+          await reader.cancel();
+        } catch (_e) {}
+        return null;
+      }
+      buffer += decoder.decode(chunk.value, { stream: true });
+      let lineBreak = buffer.indexOf("\n");
+      while (lineBreak >= 0) {
+        const line = buffer.slice(0, lineBreak).trim();
+        buffer = buffer.slice(lineBreak + 1);
+        if (line) {
+          const ev = JSON.parse(line);
+          if (ev.type === "step") {
+            applyStepEvent(ev);
+          } else if (ev.type === "complete") {
+            finalPayload = ev.payload || null;
+          } else if (ev.type === "error") {
+            throw new Error(ev.message || "Live fetch failed");
+          }
+        }
+        lineBreak = buffer.indexOf("\n");
+      }
+    }
+    const tail = buffer.trim();
+    if (tail) {
+      const ev = JSON.parse(tail);
+      if (ev.type === "step") {
+        applyStepEvent(ev);
+      } else if (ev.type === "complete") {
+        finalPayload = ev.payload || null;
+      } else if (ev.type === "error") {
+        throw new Error(ev.message || "Live fetch failed");
+      }
+    }
+    return finalPayload;
+  }
+
   async function runPoll() {
     if (!active) {
       return;
     }
+    const generation = ++pollGeneration;
+    showProgressUi();
     try {
-      const r = await fetch(url, { credentials: "same-origin" });
-      const j = await r.json();
-      if (!active) {
+      const fetchUrl = streamUrl || url;
+      const r = await fetch(fetchUrl, { credentials: "same-origin" });
+      if (!r.ok) {
+        throw new Error("HTTP " + r.status);
+      }
+      const j = await consumeNdjsonStream(r, generation);
+      if (!active || generation !== pollGeneration) {
         return;
       }
+      if (!j) {
+        throw new Error("Empty live response");
+      }
+      stopProgressTick();
+      for (const stepId in stepState) {
+        if (Object.prototype.hasOwnProperty.call(stepState, stepId) && stepState[stepId].status === "running") {
+          stepState[stepId].status = "done";
+          renderStepRow(stepId);
+        }
+      }
+      applyProgressPercent();
       renderTables(j, panel);
       const note = j.note ? String(j.note) : "";
       const when = j.fetched_at ? " · " + j.fetched_at : "";
       statusEl.textContent = (j.ok ? "Live data updated" : "Live request incomplete") + when + (note ? " — " + note : "");
     } catch (e) {
-      if (active) {
+      if (active && generation === pollGeneration) {
         statusEl.textContent = "Live request failed: " + String(e);
       }
     } finally {
-      if (active) {
+      stopProgressTick();
+      if (active && generation === pollGeneration) {
         scheduleNext();
       }
     }
@@ -271,12 +553,13 @@
       btn.setAttribute("aria-pressed", "true");
       label.textContent = "Hide live data";
       panel.hidden = false;
-      statusEl.textContent = "Fetching…";
       void runPoll();
     } else {
+      pollGeneration += 1;
       btn.setAttribute("aria-pressed", "false");
       label.textContent = "Show live data";
       panel.hidden = true;
+      hideProgressUi();
       if (timer) {
         window.clearTimeout(timer);
         timer = null;
